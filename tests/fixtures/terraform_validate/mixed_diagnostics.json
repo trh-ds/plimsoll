@@ -1,0 +1,65 @@
+{
+  "format_version": "1.0",
+  "valid": false,
+  "error_count": 2,
+  "warning_count": 1,
+  "diagnostics": [
+    {
+      "severity": "error",
+      "summary": "Invalid reference",
+      "detail": "A reference to a resource type must be followed by at least one attribute access, specifying the resource name.",
+      "range": {
+        "filename": "iam.tf",
+        "start": {
+          "line": 7,
+          "column": 14,
+          "byte": 121
+        },
+        "end": {
+          "line": 7,
+          "column": 30,
+          "byte": 137
+        }
+      },
+      "snippet": {
+        "context": "resource \"aws_iam_role_policy\" \"reports_access\"",
+        "code": "  role = aws_iam_role.arn",
+        "start_line": 7,
+        "highlight_start_offset": 13,
+        "highlight_end_offset": 29,
+        "values": []
+      }
+    },
+    {
+      "severity": "warning",
+      "summary": "Deprecated attribute",
+      "detail": "The attribute \"acl\" is deprecated. Use the aws_s3_bucket_acl resource instead.",
+      "range": {
+        "filename": "s3.tf",
+        "start": {
+          "line": 3,
+          "column": 3,
+          "byte": 44
+        },
+        "end": {
+          "line": 3,
+          "column": 22,
+          "byte": 63
+        }
+      },
+      "snippet": {
+        "context": "data \"aws_s3_bucket\" \"existing\"",
+        "code": "  acl = \"public-read\"",
+        "start_line": 3,
+        "highlight_start_offset": 2,
+        "highlight_end_offset": 21,
+        "values": []
+      }
+    },
+    {
+      "severity": "error",
+      "summary": "Missing required provider",
+      "detail": "This configuration requires provider registry.terraform.io/hashicorp/aws, but that provider isn't available. You may be able to install it automatically by running:\n  terraform init"
+    }
+  ]
+}
