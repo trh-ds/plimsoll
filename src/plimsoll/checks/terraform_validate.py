@@ -24,6 +24,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from plimsoll.checks.addresses import split_address
 from plimsoll.checks.severity_map import terraform_diagnostic_severity
 from plimsoll.core.gate import CheckContext, CheckExecutionError, register
 from plimsoll.core.models import (
@@ -64,15 +65,6 @@ def _address_from_context(context: str | None) -> tuple[str, str]:
     return f"{resource_type}.{name}", resource_type
 
 
-def _address_from_field(address: str) -> tuple[str, str]:
-    parts = address.split(".")
-    if address.startswith("data.") and len(parts) >= 3:
-        return address, parts[1]
-    if len(parts) >= 2:
-        return address, parts[0]
-    return address, ""
-
-
 def _finding_from_diagnostic(diagnostic: Mapping[str, Any]) -> Finding:
     severity_raw = str(diagnostic.get("severity") or "error")
     summary = str(diagnostic.get("summary") or "").strip() or "terraform validate diagnostic"
@@ -86,7 +78,7 @@ def _finding_from_diagnostic(diagnostic: Mapping[str, Any]) -> Finding:
 
     address_field = str(diagnostic.get("address") or "")
     if address_field:
-        resource_address, resource_type = _address_from_field(address_field)
+        resource_address, resource_type = split_address(address_field)
     else:
         snippet = diagnostic.get("snippet") or {}
         resource_address, resource_type = _address_from_context(snippet.get("context"))
