@@ -108,6 +108,27 @@ against it.
 
 **Exit criterion:** `plimsoll scan` returns correct, deduplicated, severity-ranked findings on the fixture corpus, with the suite green and no external binaries installed.
 
+### 2026-08-30 — Open-source documentation set
+
+**Done:** the repo now has the files a stranger needs before they can contribute — `LICENSE` (Apache 2.0, copyright held by "Plimsoll contributors" so no CLA is needed), `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1), `SECURITY.md`, `CHANGELOG.md` (Keep a Changelog), two GitHub issue forms, and a PR template. `README.md` was corrected against what is actually built.
+
+**Surprises:**
+
+- The README was written in the present tense about a tool that does not exist yet. Read cold at commit seven it claims a working CLI, a GitHub Action, and published benchmarks. Fixed with a "Where this actually is" table and a status banner rather than by deleting the design description — the design is the point of the README, it just needed to stop pretending to be a changelog.
+- "Signed provenance record" was in the README opening paragraph. Nothing in `specifications.md` signs anything; the design is a content hash. Corrected to "content-hashed" — the difference matters if anyone evaluates this for supply-chain use.
+- `ruff format` reformats Python blocks inside Markdown, so `CONTRIBUTING.md` failed `ruff format --check` on the code snippets in the adapter walkthrough. Applied the formatter rather than excluding `.md`; it keeps the snippets consistent with the code they describe.
+
+**Decisions:**
+
+- `CONTRIBUTING.md` leads with the adapter walkthrough because the `Check` interface is the only thing built well enough for someone to finish a contribution against today. The policy-rule walkthrough is marked as not yet possible instead of being written speculatively.
+- `SECURITY.md` defines a vulnerability in terms of the invariants: a silently dropped finding, an unverified patch reaching a human, a model setting `Decision.status`, a secret surviving redaction. None of those look like security bugs, and all of them are.
+- Security reports go through GitHub private advisories only. No email address is published anywhere in the repo.
+- The PR template's invariant checklist says that breaking an invariant opens a design conversation rather than an automatic rejection. Invariants that cannot be argued with get worked around silently instead.
+
+**Unblocked:** the repo can be made public. The adapter walkthrough gives a `good first issue` shape (Trivy, KICS) that does not require the CLI, the loop, or a model to exist.
+
+**Still open:** the `Check` interface review. No further adapters until that happens.
+
 ---
 
 ## Phase 2 — The loop
