@@ -76,6 +76,7 @@ as the reference implementation. It is about 150 lines including comments.
 ```python
 class Check(Protocol):
     name: str
+
     def is_available(self) -> ToolAvailability: ...
     def run(self, workspace: Path, config: CheckConfig) -> list[Finding]: ...
 ```
@@ -108,11 +109,13 @@ came from and the command that produced it.
 Keep parsing separate from the subprocess call:
 
 ```python
-def parse_output(payload: Mapping[str, Any]) -> list[Finding]: ...   # pure, tested directly
+def parse_output(payload: Mapping[str, Any]) -> list[Finding]: ...  # pure, tested directly
+
 
 @register("trivy")
 class TrivyCheck:
     name = "trivy"
+
     def is_available(self) -> ToolAvailability: ...
     def run(self, workspace: Path, config: CheckConfig) -> list[Finding]: ...
 ```
