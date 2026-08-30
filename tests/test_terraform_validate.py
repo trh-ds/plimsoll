@@ -29,7 +29,7 @@ def test_unsupported_argument_maps_to_a_finding():
     assert found.resource_address == "aws_s3_bucket.reports"
     assert found.resource_type == "aws_s3_bucket"
     assert found.file == Path("main.tf")
-    assert (found.line_start, found.line_end) == (12, 12)
+    assert (found.line_start, found.line_end) == (3, 3)
     assert found.message.startswith("Unsupported argument")
     assert 'named "encryption_enabled" is not expected' in found.message
     assert found.id
@@ -38,20 +38,44 @@ def test_unsupported_argument_maps_to_a_finding():
 
 
 def test_mixed_diagnostics():
-    invalid_ref, deprecated, no_provider = tv.parse_validate_output(load("mixed_diagnostics"))
+    unconfigurable, undeclared_ref, bad_type = tv.parse_validate_output(load("mixed_diagnostics"))
 
-    assert invalid_ref.severity is Severity.HIGH
-    assert invalid_ref.resource_address == "aws_iam_role_policy.reports_access"
+    # A diagnostic inside a data block, addressed through snippet.context.
+    assert unconfigurable.severity is Severity.HIGH
+    assert unconfigurable.resource_address == "data.aws_s3_bucket.existing"
+    assert unconfigurable.resource_type == "aws_s3_bucket"
 
-    # A warning is MEDIUM by the explicit table, never inferred from the wording.
-    assert deprecated.severity is Severity.MEDIUM
-    assert deprecated.resource_address == "data.aws_s3_bucket.existing"
-    assert deprecated.resource_type == "aws_s3_bucket"
+    assert undeclared_ref.rule_class == "terraform.validate.reference_to_undeclared_resource"
+    assert undeclared_ref.resource_address == "aws_iam_role_policy.reports_access"
 
-    # A diagnostic with no range or snippet still parses; it just has no location.
-    assert no_provider.resource_address == ""
-    assert no_provider.file == Path("")
-    assert (no_provider.line_start, no_provider.line_end) == (0, 0)
+    # The hallucinated-resource-type case this adapter exists to catch.
+    assert bad_type.rule_class == "terraform.validate.invalid_resource_type"
+    assert bad_type.resource_address == "aws_s3_buckets.typo"
+
+
+def test_warnings_are_medium_and_use_the_address_field():
+    argument, resource = tv.parse_validate_output(load("deprecation_warnings"))
+
+    # MEDIUM by the explicit table, never inferred from the wording.
+    assert argument.severity is Severity.MEDIUM
+    assert resource.severity is Severity.MEDIUM
+    # Provider diagnostics carry `address`, which wins over snippet.context.
+    assert argument.raw["address"] == "aws_s3_bucket_object.legacy"
+    assert argument.resource_address == "aws_s3_bucket_object.legacy"
+    assert argument.resource_type == "aws_s3_bucket_object"
+
+
+def test_an_uninitialised_workspace_is_a_failure_not_a_finding():
+    """terraform saw no provider schema, so it validated nothing.
+
+    Reporting the one diagnostic it did emit would make a check that verified nothing
+    look like a check that ran and found a single problem.
+    """
+    payload = load("uninitialized")
+    assert payload["diagnostics"][0]["summary"] == "Missing required provider"
+
+    with pytest.raises(CheckExecutionError, match="not initialised"):
+        tv.parse_validate_output(payload)
 
 
 def test_findings_from_one_file_have_distinct_ids():
@@ -186,19 +210,69 @@ def test_gate_skips_the_adapter_on_a_machine_without_terraform(monkeypatch, tmp_
     assert result.checks_failed == []
 
 
-@pytest.mark.slow
-def test_against_real_terraform(tmp_path):
-    """Shells out to a real terraform. Excluded from the unit run."""
+CONFIG_WITH_A_BAD_ARGUMENT = """
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+  }
+}
+
+resource "aws_s3_bucket" "reports" {
+  bucket             = "plimsoll-slow-test"
+  encryption_enabled = true
+}
+"""
+
+
+def _require_terraform() -> tv.TerraformValidateCheck:
     import shutil as real_shutil
 
     if real_shutil.which("terraform") is None:
         pytest.skip("terraform not installed")
-
-    (tmp_path / "main.tf").write_text(
-        'resource "aws_s3_bucket" "reports" {\n  encryption_enabled = true\n}\n',
-        encoding="utf-8",
-    )
     check = tv.TerraformValidateCheck()
-    assert check.is_available().available is True
-    findings = check.run(CheckContext(tmp_path, CheckConfig()))
-    assert findings, "terraform should reject this configuration"
+    if not check.is_available().available:
+        pytest.skip("terraform on PATH but not executable")
+    return check
+
+
+@pytest.mark.slow
+def test_real_terraform_refuses_to_validate_an_uninitialised_workspace(tmp_path):
+    """The case that made this adapter lie before it was fixed.
+
+    Without `terraform init` there is no provider schema, so terraform reports only that
+    it cannot proceed and never sees `encryption_enabled`. The adapter must fail rather
+    than pass that one diagnostic off as the file's findings.
+    """
+    check = _require_terraform()
+    (tmp_path / "main.tf").write_text(CONFIG_WITH_A_BAD_ARGUMENT, encoding="utf-8")
+
+    with pytest.raises(CheckExecutionError, match="not initialised"):
+        check.run(CheckContext(tmp_path, CheckConfig()))
+
+
+@pytest.mark.slow
+def test_against_real_terraform(tmp_path):
+    """Shells out to a real terraform, after a real init. Downloads the AWS provider."""
+    check = _require_terraform()
+    (tmp_path / "main.tf").write_text(CONFIG_WITH_A_BAD_ARGUMENT, encoding="utf-8")
+
+    init = subprocess.run(
+        ["terraform", "init", "-no-color", "-input=false"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=600,
+        check=False,
+    )
+    if init.returncode != 0:
+        pytest.skip(f"terraform init failed (offline?): {init.stderr.strip()[:200]}")
+
+    findings = check.run(CheckContext(tmp_path, CheckConfig(timeout_seconds=600)))
+
+    # Not just "some findings" -- the specific one, so this test cannot pass on a
+    # diagnostic that says terraform could not do its job.
+    assert [f.rule_class for f in findings] == ["terraform.validate.unsupported_argument"]
+    assert findings[0].resource_address == "aws_s3_bucket.reports"

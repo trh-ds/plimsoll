@@ -104,12 +104,51 @@ def _finding_from_diagnostic(diagnostic: Mapping[str, Any]) -> Finding:
     )
 
 
+# An uninitialized workspace produces exactly this and nothing else. terraform stops
+# before it can check anything the provider schema would catch, which is the whole reason
+# to run this adapter.
+_UNINITIALIZED_SUMMARIES = frozenset(
+    {
+        "Missing required provider",
+        "Module not installed",
+        "Could not load plugin",
+    }
+)
+
+
+def _uninitialized_reason(diagnostics: list[Mapping[str, Any]]) -> str | None:
+    """The summary of an initialisation diagnostic, when one is present."""
+    for diagnostic in diagnostics:
+        summary = str(diagnostic.get("summary") or "")
+        if summary in _UNINITIALIZED_SUMMARIES:
+            return summary
+    return None
+
+
 def parse_validate_output(payload: Mapping[str, Any]) -> list[Finding]:
-    """Map `terraform validate -json` output into findings."""
+    """Map `terraform validate -json` output into findings.
+
+    Raises rather than returning findings when the workspace was never initialised.
+    Without the provider schema, terraform reports only that it cannot proceed -- so the
+    one real finding would be "you forgot to run terraform init" while every actual
+    violation in the file stays invisible. Reporting that as a finding would make a check
+    that verified nothing look like a check that ran and found one problem, which is
+    exactly the failure this project exists to prevent. As a `CheckExecutionError` it
+    becomes a `FailedCheck`, is excluded from `GateResult.tooling`, and counts toward
+    "nothing was verified".
+    """
     diagnostics = payload.get("diagnostics") or []
     if not isinstance(diagnostics, list):
         raise CheckExecutionError("terraform validate output has a non-list 'diagnostics'")
-    return [_finding_from_diagnostic(d) for d in diagnostics if isinstance(d, Mapping)]
+
+    entries = [d for d in diagnostics if isinstance(d, Mapping)]
+    reason = _uninitialized_reason(entries)
+    if reason is not None:
+        raise CheckExecutionError(
+            f"workspace is not initialised ({reason}) -- run `terraform init` before "
+            "scanning, or terraform cannot see the provider schema and validates nothing"
+        )
+    return [_finding_from_diagnostic(d) for d in entries]
 
 
 def parse_version(stdout: str) -> str | None:

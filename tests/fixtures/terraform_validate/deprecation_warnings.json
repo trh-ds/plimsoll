@@ -1,0 +1,62 @@
+{
+  "format_version": "1.0",
+  "valid": true,
+  "error_count": 0,
+  "warning_count": 2,
+  "diagnostics": [
+    {
+      "severity": "warning",
+      "summary": "Argument is deprecated",
+      "detail": "key is deprecated. Use the aws_s3_object resource instead.",
+      "address": "aws_s3_bucket_object.legacy",
+      "range": {
+        "filename": "main.tf",
+        "start": {
+          "line": 7,
+          "column": 12,
+          "byte": 168
+        },
+        "end": {
+          "line": 7,
+          "column": 22,
+          "byte": 178
+        }
+      },
+      "snippet": {
+        "context": "resource \"aws_s3_bucket_object\" \"legacy\"",
+        "code": "  key    = \"seed.txt\"",
+        "start_line": 7,
+        "highlight_start_offset": 11,
+        "highlight_end_offset": 21,
+        "values": []
+      }
+    },
+    {
+      "severity": "warning",
+      "summary": "Deprecated Resource",
+      "detail": "use the aws_s3_object resource instead",
+      "address": "aws_s3_bucket_object.legacy",
+      "range": {
+        "filename": "main.tf",
+        "start": {
+          "line": 5,
+          "column": 42,
+          "byte": 119
+        },
+        "end": {
+          "line": 5,
+          "column": 43,
+          "byte": 120
+        }
+      },
+      "snippet": {
+        "context": "resource \"aws_s3_bucket_object\" \"legacy\"",
+        "code": "resource \"aws_s3_bucket_object\" \"legacy\" {",
+        "start_line": 5,
+        "highlight_start_offset": 41,
+        "highlight_end_offset": 42,
+        "values": []
+      }
+    }
+  ]
+}

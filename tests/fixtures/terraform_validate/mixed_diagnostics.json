@@ -1,65 +1,87 @@
 {
   "format_version": "1.0",
   "valid": false,
-  "error_count": 2,
-  "warning_count": 1,
+  "error_count": 3,
+  "warning_count": 0,
   "diagnostics": [
     {
       "severity": "error",
-      "summary": "Invalid reference",
-      "detail": "A reference to a resource type must be followed by at least one attribute access, specifying the resource name.",
+      "summary": "Value for unconfigurable attribute",
+      "detail": "Can't configure a value for \"region\": its value will be decided automatically based on the result of applying this configuration.",
+      "address": "data.aws_s3_bucket.existing",
       "range": {
-        "filename": "iam.tf",
+        "filename": "main.tf",
         "start": {
-          "line": 7,
-          "column": 14,
-          "byte": 121
+          "line": 22,
+          "column": 12,
+          "byte": 454
         },
         "end": {
-          "line": 7,
-          "column": 30,
-          "byte": 137
-        }
-      },
-      "snippet": {
-        "context": "resource \"aws_iam_role_policy\" \"reports_access\"",
-        "code": "  role = aws_iam_role.arn",
-        "start_line": 7,
-        "highlight_start_offset": 13,
-        "highlight_end_offset": 29,
-        "values": []
-      }
-    },
-    {
-      "severity": "warning",
-      "summary": "Deprecated attribute",
-      "detail": "The attribute \"acl\" is deprecated. Use the aws_s3_bucket_acl resource instead.",
-      "range": {
-        "filename": "s3.tf",
-        "start": {
-          "line": 3,
-          "column": 3,
-          "byte": 44
-        },
-        "end": {
-          "line": 3,
-          "column": 22,
-          "byte": 63
+          "line": 22,
+          "column": 23,
+          "byte": 465
         }
       },
       "snippet": {
         "context": "data \"aws_s3_bucket\" \"existing\"",
-        "code": "  acl = \"public-read\"",
-        "start_line": 3,
-        "highlight_start_offset": 2,
-        "highlight_end_offset": 21,
+        "code": "  region = \"us-east-1\"",
+        "start_line": 22,
+        "highlight_start_offset": 11,
+        "highlight_end_offset": 22,
         "values": []
       }
     },
     {
       "severity": "error",
-      "summary": "Missing required provider",
-      "detail": "This configuration requires provider registry.terraform.io/hashicorp/aws, but that provider isn't available. You may be able to install it automatically by running:\n  terraform init"
+      "summary": "Reference to undeclared resource",
+      "detail": "A managed resource \"aws_iam_role\" \"does_not_exist\" has not been declared in the root module.",
+      "range": {
+        "filename": "main.tf",
+        "start": {
+          "line": 12,
+          "column": 12,
+          "byte": 248
+        },
+        "end": {
+          "line": 12,
+          "column": 39,
+          "byte": 275
+        }
+      },
+      "snippet": {
+        "context": "resource \"aws_iam_role_policy\" \"reports_access\"",
+        "code": "  role   = aws_iam_role.does_not_exist.id",
+        "start_line": 12,
+        "highlight_start_offset": 11,
+        "highlight_end_offset": 38,
+        "values": []
+      }
+    },
+    {
+      "severity": "error",
+      "summary": "Invalid resource type",
+      "detail": "The provider hashicorp/aws does not support resource type \"aws_s3_buckets\". Did you mean \"aws_s3_bucket\"?",
+      "range": {
+        "filename": "main.tf",
+        "start": {
+          "line": 6,
+          "column": 10,
+          "byte": 95
+        },
+        "end": {
+          "line": 6,
+          "column": 26,
+          "byte": 111
+        }
+      },
+      "snippet": {
+        "context": "resource \"aws_s3_buckets\" \"typo\"",
+        "code": "resource \"aws_s3_buckets\" \"typo\" {",
+        "start_line": 6,
+        "highlight_start_offset": 9,
+        "highlight_end_offset": 25,
+        "values": []
+      }
     }
   ]
 }

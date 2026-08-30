@@ -1,0 +1,13 @@
+{
+  "format_version": "1.0",
+  "valid": false,
+  "error_count": 1,
+  "warning_count": 0,
+  "diagnostics": [
+    {
+      "severity": "error",
+      "summary": "Missing required provider",
+      "detail": "This configuration requires provider registry.terraform.io/hashicorp/aws, but that provider isn't available. You may be able to install it automatically by running:\n  terraform init"
+    }
+  ]
+}

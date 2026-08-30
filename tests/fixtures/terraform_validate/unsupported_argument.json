@@ -11,20 +11,20 @@
       "range": {
         "filename": "main.tf",
         "start": {
-          "line": 12,
+          "line": 3,
           "column": 3,
-          "byte": 198
+          "byte": 89
         },
         "end": {
-          "line": 12,
+          "line": 3,
           "column": 21,
-          "byte": 216
+          "byte": 107
         }
       },
       "snippet": {
         "context": "resource \"aws_s3_bucket\" \"reports\"",
         "code": "  encryption_enabled = true",
-        "start_line": 12,
+        "start_line": 3,
         "highlight_start_offset": 2,
         "highlight_end_offset": 20,
         "values": []
