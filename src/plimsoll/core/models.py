@@ -117,6 +117,10 @@ class Finding(BaseModel):
     line_end: int
     message: str
     benchmark_refs: list[str] = Field(default_factory=list)
+    # Other tools that reported this same violation and were deduplicated into this
+    # finding. Provenance has to be able to say "Checkov and OPA both flagged this";
+    # dropping the duplicate silently would lose that.
+    also_reported_by: list[CheckSource] = Field(default_factory=list)
     raw: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")

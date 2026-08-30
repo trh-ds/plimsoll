@@ -153,6 +153,47 @@ def _sort_key(finding: Finding) -> tuple[int, str, int, str]:
     return (-finding.severity.rank, finding.file.as_posix(), finding.line_start, finding.rule_id)
 
 
+def _dedupe_key(finding: Finding) -> tuple[str, str] | None:
+    """The identity two tools must agree on to be reporting the same violation.
+
+    None means "do not deduplicate this one". A finding with no resource address is
+    file-level -- a hardcoded credential, a whole-file parse error -- and two of those
+    in different places share a rule class without being the same problem. Merging them
+    would delete a real finding, which is a far worse failure than showing a duplicate.
+    """
+    if not finding.resource_address:
+        return None
+    return (finding.resource_address, finding.rule_class)
+
+
+def _deduplicate(findings: list[Finding]) -> list[Finding]:
+    """Collapse one violation reported by several tools into one finding.
+
+    Checkov and a bundled Rego rule both flag a public bucket. Two findings for one
+    problem doubles the model calls and makes the reviewer read the same thing twice.
+
+    Expects `findings` already sorted, so the first of a group is the most severe and
+    therefore the one kept.
+    """
+    kept: dict[tuple[str, str], Finding] = {}
+    out: list[Finding] = []
+    for finding in findings:
+        key = _dedupe_key(finding)
+        if key is None:
+            out.append(finding)
+            continue
+        survivor = kept.get(key)
+        if survivor is None:
+            kept[key] = finding
+            out.append(finding)
+        elif finding.source != survivor.source and finding.source not in survivor.also_reported_by:
+            # One tool can also duplicate itself: checkov's CKV_AWS_62 and CKV2_AWS_40
+            # both mean "this policy grants admin". Those collapse without adding the
+            # tool to its own credit list.
+            survivor.also_reported_by.append(finding.source)
+    return out
+
+
 class Gate:
     """Runs check adapters and aggregates their findings."""
 
@@ -173,6 +214,7 @@ class Gate:
         for check in self._checks:
             self._run_one(check, ctx, result)
         result.findings.sort(key=_sort_key)
+        result.findings = _deduplicate(result.findings)
         return result
 
     def _run_one(self, check: Check, ctx: CheckContext, result: GateResult) -> None:

@@ -229,6 +229,64 @@ def test_context_reraises_the_same_plan_failure():
         ctx.plan_json()
 
 
+def sourced(source: CheckSource, rule_class: str, severity: Severity, address: str) -> Finding:
+    return Finding(
+        source=source,
+        rule_id=f"{source.value}.{rule_class}",
+        rule_class=rule_class,
+        severity=severity,
+        resource_address=address,
+        resource_type=address.split(".")[0] if address else "",
+        file=Path("main.tf"),
+        line_start=1,
+        line_end=1,
+        message=rule_class,
+    )
+
+
+def test_one_violation_reported_by_two_tools_becomes_one_finding():
+    checkov = sourced(CheckSource.CHECKOV, "s3.acl.public", Severity.CRITICAL, "aws_s3_bucket.b")
+    opa = sourced(CheckSource.OPA, "s3.acl.public", Severity.HIGH, "aws_s3_bucket.b")
+
+    result = Gate([FakeCheck("f", available(), [checkov, opa])]).run(WORKSPACE)
+
+    (found,) = result.findings
+    # The more severe assessment survives; the other tool is credited, not discarded.
+    assert (found.source, found.severity) == (CheckSource.CHECKOV, Severity.CRITICAL)
+    assert found.also_reported_by == [CheckSource.OPA]
+
+
+def test_a_tool_that_duplicates_itself_is_not_credited_twice():
+    admin = sourced(CheckSource.CHECKOV, "iam.policy.admin_attached", Severity.HIGH, "a.b")
+    same = sourced(CheckSource.CHECKOV, "iam.policy.admin_attached", Severity.HIGH, "a.b")
+
+    result = Gate([FakeCheck("f", available(), [admin, same])]).run(WORKSPACE)
+
+    (found,) = result.findings
+    assert found.also_reported_by == []
+
+
+def test_different_resources_are_never_merged():
+    findings = [
+        sourced(CheckSource.CHECKOV, "s3.acl.public", Severity.HIGH, "aws_s3_bucket.a"),
+        sourced(CheckSource.CHECKOV, "s3.acl.public", Severity.HIGH, "aws_s3_bucket.b"),
+    ]
+    result = Gate([FakeCheck("f", available(), findings)]).run(WORKSPACE)
+
+    assert len(result.findings) == 2
+
+
+def test_file_level_findings_are_never_merged():
+    """Two hardcoded secrets in one file share a rule class without being one problem."""
+    findings = [
+        sourced(CheckSource.CHECKOV, "secret.hardcoded", Severity.CRITICAL, ""),
+        sourced(CheckSource.CHECKOV, "secret.hardcoded", Severity.CRITICAL, ""),
+    ]
+    result = Gate([FakeCheck("f", available(), findings)]).run(WORKSPACE)
+
+    assert len(result.findings) == 2
+
+
 def test_registry_exposes_every_adapter():
     assert "terraform_validate" in registered_names()
     assert [c.name for c in build_registered_checks()] == ["checkov", "terraform_validate"]
