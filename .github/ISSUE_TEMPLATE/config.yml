@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/trh-ds/plimsoll/security/advisories/new
+    about: Report privately instead. Please do not open a public issue for a security report.
+  - name: Question or design discussion
+    url: https://github.com/trh-ds/plimsoll/discussions
+    about: For "should it work this way?" rather than "it does not work".

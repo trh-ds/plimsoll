@@ -1,0 +1,53 @@
+name: Bug report
+description: Something behaves differently from what the docs say it should.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        If the bug is that Plimsoll **missed a violation** or **reported a clean run when
+        a check did not actually run**, please read [SECURITY.md](https://github.com/trh-ds/plimsoll/blob/main/SECURITY.md)
+        first — that class of bug should be reported privately.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you expected, and what you got instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce
+      description: |
+        The smallest Terraform config or tool output that triggers it. A fixture we can
+        commit is the most useful thing you can attach.
+      render: hcl
+    validations:
+      required: true
+
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      description: The full command and its output, including which checks ran and which were skipped.
+      render: shell
+
+  - type: input
+    id: version
+    attributes:
+      label: Plimsoll version or commit
+      placeholder: "commit 8814692, or `main` as of 2026-08-30"
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: |
+        Python version, OS, and the versions of any external tools involved.
+        `terraform version`, `checkov --version`, `opa version` — whichever is relevant.
+      render: shell

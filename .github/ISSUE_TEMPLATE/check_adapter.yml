@@ -1,0 +1,62 @@
+name: New check adapter
+description: Propose wrapping another policy or scanning tool.
+title: "adapter: "
+labels: ["adapter", "good first issue"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Adapters are the contribution shape this project is built for. The walkthrough is
+        in [CONTRIBUTING.md](https://github.com/trh-ds/plimsoll/blob/main/CONTRIBUTING.md#walkthrough-add-a-check-adapter),
+        and [`checks/terraform_validate.py`](https://github.com/trh-ds/plimsoll/blob/main/src/plimsoll/checks/terraform_validate.py)
+        is the reference implementation.
+
+  - type: input
+    id: tool
+    attributes:
+      label: Tool
+      placeholder: "Trivy, KICS, ..."
+    validations:
+      required: true
+
+  - type: input
+    id: command
+    attributes:
+      label: Command that produces structured output
+      description: Plimsoll never scrapes human-readable text. If the tool has no JSON mode, say so here.
+      placeholder: "trivy config --format json ."
+    validations:
+      required: true
+
+  - type: textarea
+    id: sample
+    attributes:
+      label: Sample output
+      description: A real capture, not a reconstruction from the schema. Include the tool version it came from.
+      render: json
+    validations:
+      required: true
+
+  - type: textarea
+    id: mapping
+    attributes:
+      label: Mapping notes
+      description: |
+        How the tool's output maps onto `Finding`. Call out anything that does not map
+        cleanly — this is where adapters get interesting.
+      value: |
+        - `rule_id`:
+        - `severity` vocabulary:
+        - `resource_address`:
+        - file and line:
+        - Findings that overlap rules an existing adapter already covers:
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: intent
+    attributes:
+      label: Are you planning to write it?
+      options:
+        - label: Yes, I want to submit the PR
+        - label: No, I am proposing it for someone else to pick up
