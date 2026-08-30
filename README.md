@@ -65,11 +65,13 @@ If the model hallucinates a resource type, scopes an ARN wrong, or fixes one fin
 | Piece | State |
 |---|---|
 | The gate — adapter protocol, registry, availability probing, crash isolation | **Built** |
-| `terraform_validate` adapter | **Built** |
+| `terraform_validate` and `checkov` adapters | **Built** |
 | Core models — `Finding`, `Severity`, `GateResult`, config | **Built** |
-| `checkov`, `opa`, `terraform_plan` adapters | Next, pending review of the adapter interface |
+| Cross-tool deduplication | **Built** |
+| `plimsoll scan` and `plimsoll doctor`, terminal and JSON output | **Built** |
+| `opa` and `terraform_plan` adapters | Next |
 | Bundled rule pack (20 Rego rules) | Not started |
-| CLI — `scan`, `verify`, `explain`, `exceptions`, `doctor` | Not started |
+| CLI — `verify`, `explain`, `exceptions` | Not started |
 | The reasoning loop and patch re-verification | Not started |
 | Exception store and provenance records | Not started |
 | GitHub Action and PR comments | Not started |
@@ -112,12 +114,22 @@ Plimsoll is meant to run against Copilot, Claude, Cursor, or human-written Terra
 
 ### What you can run today
 
+The deterministic scan works, against real Checkov, with real exit codes.
+
 ```bash
 git clone https://github.com/trh-ds/plimsoll
 cd plimsoll
 uv sync
-uv run pytest          # needs no terraform, checkov, or opa
+
+uv run plimsoll doctor                            # which tools are installed
+uv run plimsoll scan tests/fixtures/insecure_s3   # exit 1: findings at or above HIGH
+uv run plimsoll scan tests/fixtures/compliant_s3  # exit 0
+uv run pytest                                     # needs no terraform, checkov, or opa
 ```
+
+`scan` supports `--fail-on`, `--format terminal|json`, `--policy-dir`, and `--timeout`.
+With no checker installed it exits **3** and says nothing was verified, rather than
+reporting a clean pass.
 
 ## Design commitments
 

@@ -129,6 +129,39 @@ against it.
 
 **Still open:** the `Check` interface review. No further adapters until that happens.
 
+### 2026-08-30 — CheckContext, the checkov adapter, dedup, and the CLI
+
+**Done:** the interface fix, `checks/checkov.py`, cross-tool deduplication, `plimsoll scan` and `plimsoll doctor` with terminal and JSON reporters, and the `insecure_s3` / `compliant_s3` fixture corpus. 109 unit tests, green on a machine with no terraform, checkov, or opa. The deterministic scanner now works end to end.
+
+**The interface change.** `Check.run` takes a `CheckContext` rather than `(workspace, config)`. The protocol could not express the `opa` adapter at all: `opa eval` runs against `terraform plan` JSON that a *different* adapter produces, and there was no way to share it. Both alternatives were worse — `opa` running its own `terraform plan` pays init and plan twice and lets two adapters disagree about the flags, and having `Gate` produce the plan puts terraform inside a core that is meant to be format-agnostic. The provider is injected into `Gate`, memoized per run, and its failure is cached so every consumer fails identically rather than two adapters reaching different conclusions about one workspace. Done now because there was exactly one adapter to migrate.
+
+**Surprises, all from capturing real checkov output instead of writing fixtures against the schema:**
+
+- **Checkov's JSON top level is sometimes a list.** One object per framework, and it returns an array as soon as a second framework finds something. The `secrets` framework runs by default, so this is not an edge case — it is what any repository with a leaked credential looks like. A parser written against the documented single-object shape crashes there.
+- **`severity` is always `null`.** It is a Bridgecrew platform field. The community edition never populates it, so severity cannot come from the tool; it comes from an explicit table keyed on check ID. Nothing in the docs anticipated a scanner that reports no severity.
+- **A clean run has no `results` key at all** — just a bare summary object. `payload["results"]` raises `KeyError` on success.
+- **Checkov's Windows console script is broken.** It resolves `python.exe` off `PATH` rather than its own environment, so `checkov` is on `PATH` and cannot run. `is_available()` now treats a non-zero `--version` as unavailable, which turned a crash mid-scan into a skip.
+- **The compliant fixture cannot be checkov-clean.** Checkov also wants event notifications, a lifecycle configuration, and cross-region replication on every bucket. Those are operational opinions, not the failure modes this project targets, so "compliant" means compliant with the v0.1 rule pack. That is now stated in the fixture rather than left to be rediscovered.
+- **A single tool duplicates itself.** `CKV_AWS_62` and `CKV2_AWS_40` both mean "this policy grants admin" and both fire on the same resource. Dedup had been framed as a cross-tool problem; it is not only that.
+
+**Decisions:**
+
+- Unmapped checkov checks get a `checkov.<id>` rule class at MEDIUM, deliberately below the default `--fail-on`. Checkov ships far more opinions than the rule pack covers, and failing a merge on a rule nobody has classified is how policy-as-code gets switched off. The finding still appears.
+- `rule_map.py` carries only IDs read off real output. A misfiled finding is invisible; a missing mapping is visible in the report. Under-classification is recoverable, misclassification is not.
+- Dedup records the dropped tool in `Finding.also_reported_by` rather than discarding it — provenance has to be able to say both tools flagged it.
+- Findings with no resource address are never deduplicated. Two hardcoded secrets share a rule class without being one problem, and merging them deletes a real finding.
+- `--compact` is passed to checkov for hygiene, not brevity: without it every finding carries the offending source lines, which for a credential finding is the credential itself, and `Finding.raw` flows into provenance and prompts.
+- The CLI was pulled ahead of the `opa` and `terraform_plan` adapters, against the order in `implementation_plan.md`. That order leaves a public repository unrunnable for weeks, including for a contributor who has just written an adapter and wants to see its output.
+- `verify`, `explain`, and `exceptions` are absent rather than stubbed, with a test asserting it.
+
+**Unblocked:** `opa` and `terraform_plan` now have an interface that can carry a plan and a CLI to report through. Contributors can see an adapter's output without the loop existing.
+
+**Still open:**
+
+- `--timeout` is per-check, not the whole-run budget in `specifications.md`. Exit code 4 is unimplemented; half a timeout is worse than none.
+- The `terraform validate` fixtures are still reconstructed rather than captured — no terraform on this machine. The checkov fixtures are real.
+- `Finding.raw` carries `file_abs_path` from the scanning machine. Not a secret, but it reaches provenance and should be considered when redaction is written.
+
 ---
 
 ## Phase 2 — The loop

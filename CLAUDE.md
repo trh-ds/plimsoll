@@ -53,7 +53,9 @@ uv run pytest -m "not slow"   # skip tests that shell out to terraform
 uv run ruff check . --fix     # lint
 uv run ruff format .          # format
 uv run mypy src/              # types
-uv run plimsoll scan ./tests/fixtures/insecure_s3   # manual smoke test
+uv run plimsoll doctor                              # which external tools are installed
+uv run plimsoll scan ./tests/fixtures/insecure_s3   # manual smoke test, exits 1
+uv run plimsoll scan ./tests/fixtures/compliant_s3  # the false-positive check, exits 0
 ```
 
 Run `ruff`, `mypy`, and `pytest` before declaring any task complete.

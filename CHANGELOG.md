@@ -25,6 +25,23 @@ for what is a contract and what is not.
   recorded and the run continues.
 - **`terraform_validate` adapter** (`checks/terraform_validate.py`) — the first check.
   Parses `terraform validate -json` diagnostics into findings. Needs no credentials.
+- **`checkov` adapter** (`checks/checkov.py`) — the broadest rule coverage. Handles all
+  three shapes checkov's JSON takes, including the list it returns once a second
+  framework reports and the bare summary a clean run emits. Fixtures captured from a
+  real checkov 3.3.15 run.
+- **`checks/rule_map.py`** — checkov check IDs to internal rule classes and severities.
+  Checkov's community edition reports `severity: null` on every finding, so severity
+  cannot come from the tool. Unmapped checks land below the default `--fail-on`.
+- **Cross-tool deduplication** — one violation reported by several tools collapses to one
+  finding on `(resource_address, rule_class)`, keeping the most severe assessment and
+  recording the others in `Finding.also_reported_by`. Findings with no resource address
+  are never merged.
+- **`plimsoll scan` and `plimsoll doctor`** (`cli.py`) with terminal and JSON reporters,
+  `--fail-on`, `--format`, `--policy-dir`, and `--timeout`. Exit codes 0, 1, 2, and 3 per
+  the CLI contract; a run where no check could execute exits 3 rather than reporting
+  clean.
+- **Fixture corpus** — `tests/fixtures/insecure_s3` and `tests/fixtures/compliant_s3`,
+  the smoke-test targets the README and CLAUDE.md already referenced.
 - **`checks/severity_map.py`** — explicit tool-severity to `Severity` tables. Severity is
   never inferred.
 - **Community documentation** — `LICENSE` (Apache 2.0), `CONTRIBUTING.md` with the
@@ -46,14 +63,15 @@ for what is a contract and what is not.
 
 ### Known gaps
 
-- No CLI. `plimsoll scan`, `verify`, `explain`, `exceptions`, and `doctor` are all
-  unwritten, so the quick start in the README does not work yet.
-- Only one of the four v0.1 adapters exists. `checkov` is next; `opa` and `terraform_plan`
-  follow it.
+- `verify`, `explain`, and `exceptions` do not exist. They need the reasoning loop, the
+  exception store, and provenance, so they are absent rather than stubbed.
+- Two of the four v0.1 adapters exist. `opa` and `terraform_plan` are next.
 - No plan provider is wired into `default_gate()` yet, so `ctx.plan_json()` is always
   `None` until the `terraform_plan` adapter lands.
-- No deduplication across sources yet, and no `rule_classes.yaml`. Both land with the
-  second adapter, where they can be tested against something.
+- `--timeout` is per-check, not the whole-run budget `specifications.md` describes, and
+  exit code 4 is not implemented.
+- `rule_map.py` covers only the checkov IDs verified against real output. Everything else
+  is reported unclassified, at a severity below the default threshold.
 - The bundled rule pack, the exception store, provenance records, and the reasoning loop
   are Phases 1–3 of [`implementation_plan.md`](implementation_plan.md) and do not exist.
 - The committed `terraform validate` fixtures were reconstructed from terraform's
