@@ -78,13 +78,21 @@ class Check(Protocol):
     name: str
 
     def is_available(self) -> ToolAvailability: ...
-    def run(self, workspace: Path, config: CheckConfig) -> list[Finding]: ...
+    def run(self, ctx: CheckContext) -> list[Finding]: ...
 ```
 
 `run` returns findings or raises. It does not report skips or versions — those are the
 gate's business. Raise `CheckExecutionError` for anything that went wrong with the tool
 itself; the gate catches it, records a `FailedCheck`, and continues with the other
 adapters. One crashing check must never kill the run, and there is a test that proves it.
+
+`CheckContext` carries `workspace`, `config`, and `plan_json()`. Most adapters use the
+first two and ignore the third. `plan_json()` returns the `terraform plan` JSON that
+plan-based rule engines evaluate against; it is produced at most once per run and shared,
+so asking for it is cheap. It returns `None` when no plan is available; an adapter that
+cannot work without one must raise `CheckExecutionError` rather than return an empty
+list. Returning `[]` would record the adapter as having verified something, and a clean
+report from a check that never ran is the exact failure this project exists to prevent.
 
 ### 2. Capture real tool output
 
@@ -117,7 +125,7 @@ class TrivyCheck:
     name = "trivy"
 
     def is_available(self) -> ToolAvailability: ...
-    def run(self, workspace: Path, config: CheckConfig) -> list[Finding]: ...
+    def run(self, ctx: CheckContext) -> list[Finding]: ...
 ```
 
 That split is why the tests need no binaries. Every mapping decision is exercised

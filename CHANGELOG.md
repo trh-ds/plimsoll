@@ -33,6 +33,11 @@ for what is a contract and what is not.
 
 ### Changed
 
+- **`Check.run` now takes a `CheckContext`** instead of `(workspace, config)`. The context
+  carries the workspace, the config, and a memoized `plan_json()` so adapters that
+  evaluate rules against `terraform plan` output can share one plan rather than each
+  producing their own. Breaking for anyone who wrote an adapter against the old
+  signature, which is the point of doing it while there is one adapter.
 - Renamed the project from Bulwark to Plimsoll throughout, including the `PLIMSOLL_*`
   environment variables and the `.plimsoll/` exception store path.
 - Replaced tfsec and Terrascan with Trivy and KICS wherever the documentation named a
@@ -43,8 +48,10 @@ for what is a contract and what is not.
 
 - No CLI. `plimsoll scan`, `verify`, `explain`, `exceptions`, and `doctor` are all
   unwritten, so the quick start in the README does not work yet.
-- Only one of the four v0.1 adapters exists. `checkov`, `opa`, and `terraform_plan` are
-  pending review of the `Check` interface.
+- Only one of the four v0.1 adapters exists. `checkov` is next; `opa` and `terraform_plan`
+  follow it.
+- No plan provider is wired into `default_gate()` yet, so `ctx.plan_json()` is always
+  `None` until the `terraform_plan` adapter lands.
 - No deduplication across sources yet, and no `rule_classes.yaml`. Both land with the
   second adapter, where they can be tested against something.
 - The bundled rule pack, the exception store, provenance records, and the reasoning loop

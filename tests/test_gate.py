@@ -1,6 +1,14 @@
 from pathlib import Path
 
-from plimsoll.core.gate import Gate, build_registered_checks, default_gate, registered_names
+import pytest
+
+from plimsoll.core.gate import (
+    CheckContext,
+    Gate,
+    build_registered_checks,
+    default_gate,
+    registered_names,
+)
 from plimsoll.core.models import (
     CheckConfig,
     CheckSource,
@@ -44,7 +52,7 @@ class FakeCheck:
             raise self._probe_error
         return self._availability
 
-    def run(self, workspace: Path, config: CheckConfig) -> list[Finding]:
+    def run(self, ctx: CheckContext) -> list[Finding]:
         self.ran = True
         if self._run_error is not None:
             raise self._run_error
@@ -142,12 +150,83 @@ def test_gate_config_defaults_are_applied():
     seen: list[CheckConfig] = []
 
     class Recorder(FakeCheck):
-        def run(self, workspace, config) -> list[Finding]:
-            seen.append(config)
+        def run(self, ctx) -> list[Finding]:
+            seen.append(ctx.config)
             return []
 
     Gate([Recorder("rec", available())]).run(WORKSPACE, GateConfig())
     assert seen[0].timeout_seconds == 120
+
+
+class PlanConsumer(FakeCheck):
+    """An adapter that needs the plan artifact, the way `opa` will."""
+
+    def run(self, ctx: CheckContext) -> list[Finding]:
+        self.ran = True
+        self.plan = ctx.plan_json()
+        return list(self._findings)
+
+
+def test_plan_is_produced_once_however_many_adapters_ask():
+    calls: list[Path] = []
+
+    def provider(workspace: Path, config: CheckConfig) -> Path:
+        calls.append(workspace)
+        return Path("plan.json")
+
+    consumers = [PlanConsumer("a", available()), PlanConsumer("b", available())]
+    Gate(consumers, plan_provider=provider).run(WORKSPACE)
+
+    assert calls == [WORKSPACE]
+    assert [c.plan for c in consumers] == [Path("plan.json"), Path("plan.json")]
+
+
+def test_no_plan_provider_gives_none_rather_than_an_error():
+    consumer = PlanConsumer("needs-plan", available())
+    result = Gate([consumer]).run(WORKSPACE)
+
+    assert consumer.plan is None
+    assert result.checks_failed == []
+
+
+def test_plan_provider_failure_is_isolated_and_identical_for_every_consumer():
+    attempts: list[int] = []
+
+    def provider(workspace: Path, config: CheckConfig) -> Path:
+        attempts.append(1)
+        raise OSError("terraform init failed")
+
+    consumers = [PlanConsumer("a", available()), PlanConsumer("b", available())]
+    survivor = FakeCheck("survivor", available(tool="other"), [finding(Severity.HIGH)])
+    result = Gate([*consumers, survivor], plan_provider=provider).run(WORKSPACE)
+
+    # Both consumers fail the same way, and the failure is not retried per adapter.
+    assert [f.name for f in result.checks_failed] == ["a", "b"]
+    assert attempts == [1]
+    assert len(result.findings) == 1
+
+
+def test_context_plan_is_memoized_across_direct_calls():
+    calls: list[int] = []
+
+    def provider(workspace: Path, config: CheckConfig) -> Path:
+        calls.append(1)
+        return Path("plan.json")
+
+    ctx = CheckContext(WORKSPACE, CheckConfig(), provider)
+    assert ctx.plan_json() == ctx.plan_json() == Path("plan.json")
+    assert calls == [1]
+
+
+def test_context_reraises_the_same_plan_failure():
+    def provider(workspace: Path, config: CheckConfig) -> Path:
+        raise RuntimeError("no credentials")
+
+    ctx = CheckContext(WORKSPACE, CheckConfig(), provider)
+    with pytest.raises(RuntimeError):
+        ctx.plan_json()
+    with pytest.raises(RuntimeError):
+        ctx.plan_json()
 
 
 def test_registry_exposes_the_terraform_validate_adapter():

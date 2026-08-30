@@ -25,9 +25,8 @@ from pathlib import Path
 from typing import Any
 
 from plimsoll.checks.severity_map import terraform_diagnostic_severity
-from plimsoll.core.gate import CheckExecutionError, register
+from plimsoll.core.gate import CheckContext, CheckExecutionError, register
 from plimsoll.core.models import (
-    CheckConfig,
     CheckSource,
     Finding,
     ToolAvailability,
@@ -155,16 +154,18 @@ class TerraformValidateCheck:
         # unknown, which provenance records honestly rather than treating as absence.
         return ToolAvailability.ok(BINARY, parse_version(completed.stdout))
 
-    def run(self, workspace: Path, config: CheckConfig) -> list[Finding]:
+    def run(self, ctx: CheckContext) -> list[Finding]:
+        # No plan needed: validate reads the HCL directly, which is why it is the one
+        # check that works with no credentials and no provider download.
         executable = shutil.which(BINARY)
         if executable is None:
             raise CheckExecutionError(f"{BINARY} disappeared from PATH between probe and run")
         completed = subprocess.run(
             [executable, "validate", "-json"],
-            cwd=workspace,
+            cwd=ctx.workspace,
             capture_output=True,
             text=True,
-            timeout=config.timeout_seconds,
+            timeout=ctx.config.timeout_seconds,
             check=False,
         )
         # Exit code 1 just means "invalid", which is the interesting case. Only

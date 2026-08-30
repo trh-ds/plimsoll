@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from plimsoll.checks import terraform_validate as tv
-from plimsoll.core.gate import CheckExecutionError, Gate
+from plimsoll.core.gate import CheckContext, CheckExecutionError, Gate
 from plimsoll.core.models import CheckConfig, CheckSource, Severity
 
 FIXTURES = Path(__file__).parent / "fixtures" / "terraform_validate"
@@ -159,7 +159,7 @@ def test_run_parses_stdout(monkeypatch, tmp_path):
         # Exit code 1 means "invalid", which is the case we care about.
         lambda *a, **k: subprocess.CompletedProcess(a[0], 1, stdout=payload, stderr=""),
     )
-    findings = tv.TerraformValidateCheck().run(tmp_path, CheckConfig())
+    findings = tv.TerraformValidateCheck().run(CheckContext(tmp_path, CheckConfig()))
     assert [f.rule_class for f in findings] == ["terraform.validate.unsupported_argument"]
 
 
@@ -173,7 +173,7 @@ def test_run_raises_when_output_is_not_json(monkeypatch, tmp_path):
         ),
     )
     with pytest.raises(CheckExecutionError, match="did not return JSON"):
-        tv.TerraformValidateCheck().run(tmp_path, CheckConfig())
+        tv.TerraformValidateCheck().run(CheckContext(tmp_path, CheckConfig()))
 
 
 def test_gate_skips_the_adapter_on_a_machine_without_terraform(monkeypatch, tmp_path):
@@ -200,5 +200,5 @@ def test_against_real_terraform(tmp_path):
     )
     check = tv.TerraformValidateCheck()
     assert check.is_available().available is True
-    findings = check.run(tmp_path, CheckConfig())
+    findings = check.run(CheckContext(tmp_path, CheckConfig()))
     assert findings, "terraform should reject this configuration"
