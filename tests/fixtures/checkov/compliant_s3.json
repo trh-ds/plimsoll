@@ -1,0 +1,327 @@
+{
+    "check_type": "terraform",
+    "results": {
+        "failed_checks": [
+            {
+                "check_id": "CKV2_AWS_62",
+                "bc_check_id": "BC_AWS_LOGGING_36",
+                "check_name": "Ensure S3 buckets should have event notifications enabled",
+                "check_result": {
+                    "result": "FAILED",
+                    "entity": {
+                        "aws_s3_bucket": {
+                            "logs": {
+                                "__end_line__": 27,
+                                "__start_line__": 25,
+                                "bucket": [
+                                    "plimsoll-fixture-compliant-logs"
+                                ],
+                                "__address__": "aws_s3_bucket.logs",
+                                "__provider_address__": "aws.default"
+                            }
+                        }
+                    },
+                    "evaluated_keys": [
+                        "resource_type"
+                    ]
+                },
+                "code_block": null,
+                "file_path": "\\main.tf",
+                "file_abs_path": "C:\\repo\\tests\\fixtures\\compliant_s3\\main.tf",
+                "repo_file_path": "/tests/fixtures/compliant_s3/main.tf",
+                "file_line_range": [
+                    25,
+                    27
+                ],
+                "resource": "aws_s3_bucket.logs",
+                "evaluations": null,
+                "check_class": "checkov.common.graph.checks_infra.base_check",
+                "fixed_definition": null,
+                "entity_tags": null,
+                "caller_file_path": null,
+                "caller_file_line_range": null,
+                "resource_address": null,
+                "severity": null,
+                "bc_category": null,
+                "benchmarks": null,
+                "description": null,
+                "short_description": null,
+                "vulnerability_details": null,
+                "connected_node": null,
+                "guideline": "https://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/aws-logging-policies/bc-aws-2-62",
+                "details": [],
+                "check_len": null,
+                "definition_context_file_path": "C:\\repo\\tests\\fixtures\\compliant_s3\\main.tf"
+            },
+            {
+                "check_id": "CKV2_AWS_62",
+                "bc_check_id": "BC_AWS_LOGGING_36",
+                "check_name": "Ensure S3 buckets should have event notifications enabled",
+                "check_result": {
+                    "result": "FAILED",
+                    "entity": {
+                        "aws_s3_bucket": {
+                            "reports": {
+                                "__end_line__": 58,
+                                "__start_line__": 56,
+                                "bucket": [
+                                    "plimsoll-fixture-compliant-reports"
+                                ],
+                                "__address__": "aws_s3_bucket.reports",
+                                "__provider_address__": "aws.default"
+                            }
+                        }
+                    },
+                    "evaluated_keys": [
+                        "resource_type"
+                    ]
+                },
+                "code_block": null,
+                "file_path": "\\main.tf",
+                "file_abs_path": "C:\\repo\\tests\\fixtures\\compliant_s3\\main.tf",
+                "repo_file_path": "/tests/fixtures/compliant_s3/main.tf",
+                "file_line_range": [
+                    56,
+                    58
+                ],
+                "resource": "aws_s3_bucket.reports",
+                "evaluations": null,
+                "check_class": "checkov.common.graph.checks_infra.base_check",
+                "fixed_definition": null,
+                "entity_tags": null,
+                "caller_file_path": null,
+                "caller_file_line_range": null,
+                "resource_address": null,
+                "severity": null,
+                "bc_category": null,
+                "benchmarks": null,
+                "description": null,
+                "short_description": null,
+                "vulnerability_details": null,
+                "connected_node": null,
+                "guideline": "https://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/aws-logging-policies/bc-aws-2-62",
+                "details": [],
+                "check_len": null,
+                "definition_context_file_path": "C:\\repo\\tests\\fixtures\\compliant_s3\\main.tf"
+            },
+            {
+                "check_id": "CKV_AWS_144",
+                "bc_check_id": "BC_AWS_GENERAL_72",
+                "check_name": "Ensure that S3 bucket has cross-region replication enabled",
+                "check_result": {
+                    "result": "FAILED",
+                    "entity": {
+                        "aws_s3_bucket": {
+                            "logs": {
+                                "__end_line__": 27,
+                                "__start_line__": 25,
+                                "bucket": [
+                                    "plimsoll-fixture-compliant-logs"
+                                ],
+                                "__address__": "aws_s3_bucket.logs",
+                                "__provider_address__": "aws.default"
+                            }
+                        }
+                    },
+                    "evaluated_keys": [
+                        "rule/*/status",
+                        "replication_configuration/rules/*/status",
+                        "resource_type"
+                    ]
+                },
+                "code_block": null,
+                "file_path": "\\main.tf",
+                "file_abs_path": "C:\\repo\\tests\\fixtures\\compliant_s3\\main.tf",
+                "repo_file_path": "/tests/fixtures/compliant_s3/main.tf",
+                "file_line_range": [
+                    25,
+                    27
+                ],
+                "resource": "aws_s3_bucket.logs",
+                "evaluations": null,
+                "check_class": "checkov.common.graph.checks_infra.base_check",
+                "fixed_definition": null,
+                "entity_tags": null,
+                "caller_file_path": null,
+                "caller_file_line_range": null,
+                "resource_address": null,
+                "severity": null,
+                "bc_category": null,
+                "benchmarks": null,
+                "description": null,
+                "short_description": null,
+                "vulnerability_details": null,
+                "connected_node": null,
+                "guideline": "https://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/aws-general-policies/ensure-that-s3-bucket-has-cross-region-replication-enabled",
+                "details": [],
+                "check_len": null,
+                "definition_context_file_path": "C:\\repo\\tests\\fixtures\\compliant_s3\\main.tf"
+            },
+            {
+                "check_id": "CKV_AWS_144",
+                "bc_check_id": "BC_AWS_GENERAL_72",
+                "check_name": "Ensure that S3 bucket has cross-region replication enabled",
+                "check_result": {
+                    "result": "FAILED",
+                    "entity": {
+                        "aws_s3_bucket": {
+                            "reports": {
+                                "__end_line__": 58,
+                                "__start_line__": 56,
+                                "bucket": [
+                                    "plimsoll-fixture-compliant-reports"
+                                ],
+                                "__address__": "aws_s3_bucket.reports",
+                                "__provider_address__": "aws.default"
+                            }
+                        }
+                    },
+                    "evaluated_keys": [
+                        "rule/*/status",
+                        "replication_configuration/rules/*/status",
+                        "resource_type"
+                    ]
+                },
+                "code_block": null,
+                "file_path": "\\main.tf",
+                "file_abs_path": "C:\\repo\\tests\\fixtures\\compliant_s3\\main.tf",
+                "repo_file_path": "/tests/fixtures/compliant_s3/main.tf",
+                "file_line_range": [
+                    56,
+                    58
+                ],
+                "resource": "aws_s3_bucket.reports",
+                "evaluations": null,
+                "check_class": "checkov.common.graph.checks_infra.base_check",
+                "fixed_definition": null,
+                "entity_tags": null,
+                "caller_file_path": null,
+                "caller_file_line_range": null,
+                "resource_address": null,
+                "severity": null,
+                "bc_category": null,
+                "benchmarks": null,
+                "description": null,
+                "short_description": null,
+                "vulnerability_details": null,
+                "connected_node": null,
+                "guideline": "https://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/aws-general-policies/ensure-that-s3-bucket-has-cross-region-replication-enabled",
+                "details": [],
+                "check_len": null,
+                "definition_context_file_path": "C:\\repo\\tests\\fixtures\\compliant_s3\\main.tf"
+            },
+            {
+                "check_id": "CKV2_AWS_61",
+                "bc_check_id": "BC_AWS_LOGGING_35",
+                "check_name": "Ensure that an S3 bucket has a lifecycle configuration",
+                "check_result": {
+                    "result": "FAILED",
+                    "entity": {
+                        "aws_s3_bucket": {
+                            "logs": {
+                                "__end_line__": 27,
+                                "__start_line__": 25,
+                                "bucket": [
+                                    "plimsoll-fixture-compliant-logs"
+                                ],
+                                "__address__": "aws_s3_bucket.logs",
+                                "__provider_address__": "aws.default"
+                            }
+                        }
+                    },
+                    "evaluated_keys": [
+                        "lifecycle_rule",
+                        "resource_type"
+                    ]
+                },
+                "code_block": null,
+                "file_path": "\\main.tf",
+                "file_abs_path": "C:\\repo\\tests\\fixtures\\compliant_s3\\main.tf",
+                "repo_file_path": "/tests/fixtures/compliant_s3/main.tf",
+                "file_line_range": [
+                    25,
+                    27
+                ],
+                "resource": "aws_s3_bucket.logs",
+                "evaluations": null,
+                "check_class": "checkov.common.graph.checks_infra.base_check",
+                "fixed_definition": null,
+                "entity_tags": null,
+                "caller_file_path": null,
+                "caller_file_line_range": null,
+                "resource_address": null,
+                "severity": null,
+                "bc_category": null,
+                "benchmarks": null,
+                "description": null,
+                "short_description": null,
+                "vulnerability_details": null,
+                "connected_node": null,
+                "guideline": "https://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/aws-logging-policies/bc-aws-2-61",
+                "details": [],
+                "check_len": null,
+                "definition_context_file_path": "C:\\repo\\tests\\fixtures\\compliant_s3\\main.tf"
+            },
+            {
+                "check_id": "CKV2_AWS_61",
+                "bc_check_id": "BC_AWS_LOGGING_35",
+                "check_name": "Ensure that an S3 bucket has a lifecycle configuration",
+                "check_result": {
+                    "result": "FAILED",
+                    "entity": {
+                        "aws_s3_bucket": {
+                            "reports": {
+                                "__end_line__": 58,
+                                "__start_line__": 56,
+                                "bucket": [
+                                    "plimsoll-fixture-compliant-reports"
+                                ],
+                                "__address__": "aws_s3_bucket.reports",
+                                "__provider_address__": "aws.default"
+                            }
+                        }
+                    },
+                    "evaluated_keys": [
+                        "lifecycle_rule",
+                        "resource_type"
+                    ]
+                },
+                "code_block": null,
+                "file_path": "\\main.tf",
+                "file_abs_path": "C:\\repo\\tests\\fixtures\\compliant_s3\\main.tf",
+                "repo_file_path": "/tests/fixtures/compliant_s3/main.tf",
+                "file_line_range": [
+                    56,
+                    58
+                ],
+                "resource": "aws_s3_bucket.reports",
+                "evaluations": null,
+                "check_class": "checkov.common.graph.checks_infra.base_check",
+                "fixed_definition": null,
+                "entity_tags": null,
+                "caller_file_path": null,
+                "caller_file_line_range": null,
+                "resource_address": null,
+                "severity": null,
+                "bc_category": null,
+                "benchmarks": null,
+                "description": null,
+                "short_description": null,
+                "vulnerability_details": null,
+                "connected_node": null,
+                "guideline": "https://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/aws-logging-policies/bc-aws-2-61",
+                "details": [],
+                "check_len": null,
+                "definition_context_file_path": "C:\\repo\\tests\\fixtures\\compliant_s3\\main.tf"
+            }
+        ]
+    },
+    "summary": {
+        "passed": 32,
+        "failed": 6,
+        "skipped": 0,
+        "parsing_errors": 0,
+        "resource_count": 11,
+        "checkov_version": "3.3.15"
+    }
+}

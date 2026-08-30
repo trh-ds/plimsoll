@@ -229,7 +229,7 @@ def test_context_reraises_the_same_plan_failure():
         ctx.plan_json()
 
 
-def test_registry_exposes_the_terraform_validate_adapter():
+def test_registry_exposes_every_adapter():
     assert "terraform_validate" in registered_names()
-    assert [c.name for c in build_registered_checks()] == ["terraform_validate"]
-    assert [c.name for c in default_gate().checks] == ["terraform_validate"]
+    assert [c.name for c in build_registered_checks()] == ["checkov", "terraform_validate"]
+    assert [c.name for c in default_gate().checks] == ["checkov", "terraform_validate"]

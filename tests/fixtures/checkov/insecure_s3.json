@@ -1,0 +1,811 @@
+{
+    "check_type": "terraform",
+    "results": {
+        "failed_checks": [
+            {
+                "check_id": "CKV_AWS_62",
+                "bc_check_id": "BC_AWS_IAM_47",
+                "check_name": "Ensure IAM policies that allow full \"*-*\" administrative privileges are not created",
+                "check_result": {
+                    "result": "FAILED",
+                    "evaluated_keys": [
+                        "policy",
+                        "inline_policy"
+                    ]
+                },
+                "code_block": null,
+                "file_path": "\\main.tf",
+                "file_abs_path": "C:\\repo\\tests\\fixtures\\insecure_s3\\main.tf",
+                "repo_file_path": "/tests/fixtures/insecure_s3/main.tf",
+                "file_line_range": [
+                    60,
+                    74
+                ],
+                "resource": "aws_iam_role_policy.reports_access",
+                "evaluations": null,
+                "check_class": "checkov.terraform.checks.resource.aws.IAMAdminPolicyDocument",
+                "fixed_definition": null,
+                "entity_tags": null,
+                "caller_file_path": null,
+                "caller_file_line_range": null,
+                "resource_address": null,
+                "severity": null,
+                "bc_category": null,
+                "benchmarks": null,
+                "description": null,
+                "short_description": null,
+                "vulnerability_details": null,
+                "connected_node": null,
+                "guideline": "https://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/aws-iam-policies/bc-aws-iam-45",
+                "details": [],
+                "check_len": null,
+                "definition_context_file_path": "C:\\repo\\tests\\fixtures\\insecure_s3\\main.tf"
+            },
+            {
+                "check_id": "CKV_AWS_287",
+                "bc_check_id": "BC_AWS_IAM_82",
+                "check_name": "Ensure IAM policies does not allow credentials exposure",
+                "check_result": {
+                    "result": "FAILED",
+                    "evaluated_keys": [
+                        "policy/Statement/[0]/Action"
+                    ]
+                },
+                "code_block": null,
+                "file_path": "\\main.tf",
+                "file_abs_path": "C:\\repo\\tests\\fixtures\\insecure_s3\\main.tf",
+                "repo_file_path": "/tests/fixtures/insecure_s3/main.tf",
+                "file_line_range": [
+                    60,
+                    74
+                ],
+                "resource": "aws_iam_role_policy.reports_access",
+                "evaluations": null,
+                "check_class": "checkov.terraform.checks.resource.aws.IAMCredentialsExposure",
+                "fixed_definition": null,
+                "entity_tags": null,
+                "caller_file_path": null,
+                "caller_file_line_range": null,
+                "resource_address": null,
+                "severity": null,
+                "bc_category": null,
+                "benchmarks": null,
+                "description": null,
+                "short_description": null,
+                "vulnerability_details": null,
+                "connected_node": null,
+                "guideline": "https://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/aws-iam-policies/bc-aws-287",
+                "details": [],
+                "check_len": null,
+                "definition_context_file_path": "C:\\repo\\tests\\fixtures\\insecure_s3\\main.tf"
+            },
+            {
+                "check_id": "CKV_AWS_288",
+                "bc_check_id": "BC_AWS_IAM_83",
+                "check_name": "Ensure IAM policies does not allow data exfiltration",
+                "check_result": {
+                    "result": "FAILED",
+                    "evaluated_keys": [
+                        "policy/Statement/[0]/Action"
+                    ]
+                },
+                "code_block": null,
+                "file_path": "\\main.tf",
+                "file_abs_path": "C:\\repo\\tests\\fixtures\\insecure_s3\\main.tf",
+                "repo_file_path": "/tests/fixtures/insecure_s3/main.tf",
+                "file_line_range": [
+                    60,
+                    74
+                ],
+                "resource": "aws_iam_role_policy.reports_access",
+                "evaluations": null,
+                "check_class": "checkov.terraform.checks.resource.aws.IAMDataExfiltration",
+                "fixed_definition": null,
+                "entity_tags": null,
+                "caller_file_path": null,
+                "caller_file_line_range": null,
+                "resource_address": null,
+                "severity": null,
+                "bc_category": null,
+                "benchmarks": null,
+                "description": null,
+                "short_description": null,
+                "vulnerability_details": null,
+                "connected_node": null,
+                "guideline": "https://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/aws-iam-policies/bc-aws-288",
+                "details": [],
+                "check_len": null,
+                "definition_context_file_path": "C:\\repo\\tests\\fixtures\\insecure_s3\\main.tf"
+            },
+            {
+                "check_id": "CKV_AWS_289",
+                "bc_check_id": "BC_AWS_IAM_84",
+                "check_name": "Ensure IAM policies does not allow permissions management / resource exposure without constraints",
+                "check_result": {
+                    "result": "FAILED",
+                    "evaluated_keys": [
+                        "policy/Statement/[0]/Action"
+                    ]
+                },
+                "code_block": null,
+                "file_path": "\\main.tf",
+                "file_abs_path": "C:\\repo\\tests\\fixtures\\insecure_s3\\main.tf",
+                "repo_file_path": "/tests/fixtures/insecure_s3/main.tf",
+                "file_line_range": [
+                    60,
+                    74
+                ],
+                "resource": "aws_iam_role_policy.reports_access",
+                "evaluations": null,
+                "check_class": "checkov.terraform.checks.resource.aws.IAMPermissionsManagement",
+                "fixed_definition": null,
+                "entity_tags": null,
+                "caller_file_path": null,
+                "caller_file_line_range": null,
+                "resource_address": null,
+                "severity": null,
+                "bc_category": null,
+                "benchmarks": null,
+                "description": null,
+                "short_description": null,
+                "vulnerability_details": null,
+                "connected_node": null,
+                "guideline": "https://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/aws-iam-policies/bc-aws-289",
+                "details": [],
+                "check_len": null,
+                "definition_context_file_path": "C:\\repo\\tests\\fixtures\\insecure_s3\\main.tf"
+            },
+            {
+                "check_id": "CKV_AWS_286",
+                "bc_check_id": "BC_AWS_IAM_81",
+                "check_name": "Ensure IAM policies does not allow privilege escalation",
+                "check_result": {
+                    "result": "FAILED",
+                    "evaluated_keys": [
+                        "policy/Statement/[0]/Action"
+                    ]
+                },
+                "code_block": null,
+                "file_path": "\\main.tf",
+                "file_abs_path": "C:\\repo\\tests\\fixtures\\insecure_s3\\main.tf",
+                "repo_file_path": "/tests/fixtures/insecure_s3/main.tf",
+                "file_line_range": [
+                    60,
+                    74
+                ],
+                "resource": "aws_iam_role_policy.reports_access",
+                "evaluations": null,
+                "check_class": "checkov.terraform.checks.resource.aws.IAMPrivilegeEscalation",
+                "fixed_definition": null,
+                "entity_tags": null,
+                "caller_file_path": null,
+                "caller_file_line_range": null,
+                "resource_address": null,
+                "severity": null,
+                "bc_category": null,
+                "benchmarks": null,
+                "description": null,
+                "short_description": null,
+                "vulnerability_details": null,
+                "connected_node": null,
+                "guideline": "https://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/aws-iam-policies/bc-aws-286",
+                "details": [],
+                "check_len": null,
+                "definition_context_file_path": "C:\\repo\\tests\\fixtures\\insecure_s3\\main.tf"
+            },
+            {
+                "check_id": "CKV_AWS_63",
+                "bc_check_id": "BC_AWS_IAM_48",
+                "check_name": "Ensure no IAM policies documents allow \"*\" as a statement's actions",
+                "check_result": {
+                    "result": "FAILED",
+                    "evaluated_keys": [
+                        "policy",
+                        "inline_policy"
+                    ]
+                },
+                "code_block": null,
+                "file_path": "\\main.tf",
+                "file_abs_path": "C:\\repo\\tests\\fixtures\\insecure_s3\\main.tf",
+                "repo_file_path": "/tests/fixtures/insecure_s3/main.tf",
+                "file_line_range": [
+                    60,
+                    74
+                ],
+                "resource": "aws_iam_role_policy.reports_access",
+                "evaluations": null,
+                "check_class": "checkov.terraform.checks.resource.aws.IAMStarActionPolicyDocument",
+                "fixed_definition": null,
+                "entity_tags": null,
+                "caller_file_path": null,
+                "caller_file_line_range": null,
+                "resource_address": null,
+                "severity": null,
+                "bc_category": null,
+                "benchmarks": null,
+                "description": null,
+                "short_description": null,
+                "vulnerability_details": null,
+                "connected_node": null,
+                "guideline": "https://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/aws-iam-policies/iam-48",
+                "details": [],
+                "check_len": null,
+                "definition_context_file_path": "C:\\repo\\tests\\fixtures\\insecure_s3\\main.tf"
+            },
+            {
+                "check_id": "CKV_AWS_355",
+                "bc_check_id": "BC_AWS_IAM_88",
+                "check_name": "Ensure no IAM policies documents allow \"*\" as a statement's resource for restrictable actions",
+                "check_result": {
+                    "result": "FAILED",
+                    "evaluated_keys": [
+                        "policy/Statement/[0]/Action"
+                    ]
+                },
+                "code_block": null,
+                "file_path": "\\main.tf",
+                "file_abs_path": "C:\\repo\\tests\\fixtures\\insecure_s3\\main.tf",
+                "repo_file_path": "/tests/fixtures/insecure_s3/main.tf",
+                "file_line_range": [
+                    60,
+                    74
+                ],
+                "resource": "aws_iam_role_policy.reports_access",
+                "evaluations": null,
+                "check_class": "checkov.terraform.checks.resource.aws.IAMStarResourcePolicyDocument",
+                "fixed_definition": null,
+                "entity_tags": null,
+                "caller_file_path": null,
+                "caller_file_line_range": null,
+                "resource_address": null,
+                "severity": null,
+                "bc_category": null,
+                "benchmarks": null,
+                "description": null,
+                "short_description": null,
+                "vulnerability_details": null,
+                "connected_node": null,
+                "guideline": "https://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/aws-iam-policies/bc-aws-355",
+                "details": [],
+                "check_len": null,
+                "definition_context_file_path": "C:\\repo\\tests\\fixtures\\insecure_s3\\main.tf"
+            },
+            {
+                "check_id": "CKV_AWS_290",
+                "bc_check_id": "BC_AWS_IAM_85",
+                "check_name": "Ensure IAM policies does not allow write access without constraints",
+                "check_result": {
+                    "result": "FAILED",
+                    "evaluated_keys": [
+                        "policy/Statement/[0]/Action"
+                    ]
+                },
+                "code_block": null,
+                "file_path": "\\main.tf",
+                "file_abs_path": "C:\\repo\\tests\\fixtures\\insecure_s3\\main.tf",
+                "repo_file_path": "/tests/fixtures/insecure_s3/main.tf",
+                "file_line_range": [
+                    60,
+                    74
+                ],
+                "resource": "aws_iam_role_policy.reports_access",
+                "evaluations": null,
+                "check_class": "checkov.terraform.checks.resource.aws.IAMWriteAccess",
+                "fixed_definition": null,
+                "entity_tags": null,
+                "caller_file_path": null,
+                "caller_file_line_range": null,
+                "resource_address": null,
+                "severity": null,
+                "bc_category": null,
+                "benchmarks": null,
+                "description": null,
+                "short_description": null,
+                "vulnerability_details": null,
+                "connected_node": null,
+                "guideline": "https://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/aws-iam-policies/bc-aws-290",
+                "details": [],
+                "check_len": null,
+                "definition_context_file_path": "C:\\repo\\tests\\fixtures\\insecure_s3\\main.tf"
+            },
+            {
+                "check_id": "CKV2_AWS_62",
+                "bc_check_id": "BC_AWS_LOGGING_36",
+                "check_name": "Ensure S3 buckets should have event notifications enabled",
+                "check_result": {
+                    "result": "FAILED",
+                    "entity": {
+                        "aws_s3_bucket": {
+                            "reports": {
+                                "__end_line__": 30,
+                                "__start_line__": 28,
+                                "bucket": [
+                                    "plimsoll-fixture-insecure-reports"
+                                ],
+                                "__address__": "aws_s3_bucket.reports",
+                                "__provider_address__": "aws.default"
+                            }
+                        }
+                    },
+                    "evaluated_keys": [
+                        "resource_type"
+                    ]
+                },
+                "code_block": null,
+                "file_path": "\\main.tf",
+                "file_abs_path": "C:\\repo\\tests\\fixtures\\insecure_s3\\main.tf",
+                "repo_file_path": "/tests/fixtures/insecure_s3/main.tf",
+                "file_line_range": [
+                    28,
+                    30
+                ],
+                "resource": "aws_s3_bucket.reports",
+                "evaluations": null,
+                "check_class": "checkov.common.graph.checks_infra.base_check",
+                "fixed_definition": null,
+                "entity_tags": null,
+                "caller_file_path": null,
+                "caller_file_line_range": null,
+                "resource_address": null,
+                "severity": null,
+                "bc_category": null,
+                "benchmarks": null,
+                "description": null,
+                "short_description": null,
+                "vulnerability_details": null,
+                "connected_node": null,
+                "guideline": "https://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/aws-logging-policies/bc-aws-2-62",
+                "details": [],
+                "check_len": null,
+                "definition_context_file_path": "C:\\repo\\tests\\fixtures\\insecure_s3\\main.tf"
+            },
+            {
+                "check_id": "CKV2_AWS_6",
+                "bc_check_id": "BC_AWS_NETWORKING_52",
+                "check_name": "Ensure that S3 bucket has a Public Access block",
+                "check_result": {
+                    "result": "FAILED",
+                    "entity": {
+                        "aws_s3_bucket": {
+                            "reports": {
+                                "__end_line__": 30,
+                                "__start_line__": 28,
+                                "bucket": [
+                                    "plimsoll-fixture-insecure-reports"
+                                ],
+                                "__address__": "aws_s3_bucket.reports",
+                                "__provider_address__": "aws.default"
+                            }
+                        }
+                    },
+                    "evaluated_keys": [
+                        "block_public_acls",
+                        "block_public_policy",
+                        "resource_type"
+                    ]
+                },
+                "code_block": null,
+                "file_path": "\\main.tf",
+                "file_abs_path": "C:\\repo\\tests\\fixtures\\insecure_s3\\main.tf",
+                "repo_file_path": "/tests/fixtures/insecure_s3/main.tf",
+                "file_line_range": [
+                    28,
+                    30
+                ],
+                "resource": "aws_s3_bucket.reports",
+                "evaluations": null,
+                "check_class": "checkov.common.graph.checks_infra.base_check",
+                "fixed_definition": null,
+                "entity_tags": null,
+                "caller_file_path": null,
+                "caller_file_line_range": null,
+                "resource_address": null,
+                "severity": null,
+                "bc_category": null,
+                "benchmarks": null,
+                "description": null,
+                "short_description": null,
+                "vulnerability_details": null,
+                "connected_node": null,
+                "guideline": "https://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/aws-networking-policies/s3-bucket-should-have-public-access-blocks-defaults-to-false-if-the-public-access-block-is-not-attached",
+                "details": [],
+                "check_len": null,
+                "definition_context_file_path": "C:\\repo\\tests\\fixtures\\insecure_s3\\main.tf"
+            },
+            {
+                "check_id": "CKV_AWS_144",
+                "bc_check_id": "BC_AWS_GENERAL_72",
+                "check_name": "Ensure that S3 bucket has cross-region replication enabled",
+                "check_result": {
+                    "result": "FAILED",
+                    "entity": {
+                        "aws_s3_bucket": {
+                            "reports": {
+                                "__end_line__": 30,
+                                "__start_line__": 28,
+                                "bucket": [
+                                    "plimsoll-fixture-insecure-reports"
+                                ],
+                                "__address__": "aws_s3_bucket.reports",
+                                "__provider_address__": "aws.default"
+                            }
+                        }
+                    },
+                    "evaluated_keys": [
+                        "replication_configuration/rules/*/status",
+                        "resource_type",
+                        "rule/*/status"
+                    ]
+                },
+                "code_block": null,
+                "file_path": "\\main.tf",
+                "file_abs_path": "C:\\repo\\tests\\fixtures\\insecure_s3\\main.tf",
+                "repo_file_path": "/tests/fixtures/insecure_s3/main.tf",
+                "file_line_range": [
+                    28,
+                    30
+                ],
+                "resource": "aws_s3_bucket.reports",
+                "evaluations": null,
+                "check_class": "checkov.common.graph.checks_infra.base_check",
+                "fixed_definition": null,
+                "entity_tags": null,
+                "caller_file_path": null,
+                "caller_file_line_range": null,
+                "resource_address": null,
+                "severity": null,
+                "bc_category": null,
+                "benchmarks": null,
+                "description": null,
+                "short_description": null,
+                "vulnerability_details": null,
+                "connected_node": null,
+                "guideline": "https://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/aws-general-policies/ensure-that-s3-bucket-has-cross-region-replication-enabled",
+                "details": [],
+                "check_len": null,
+                "definition_context_file_path": "C:\\repo\\tests\\fixtures\\insecure_s3\\main.tf"
+            },
+            {
+                "check_id": "CKV_AWS_18",
+                "bc_check_id": "BC_AWS_S3_13",
+                "check_name": "Ensure the S3 bucket has access logging enabled",
+                "check_result": {
+                    "result": "FAILED",
+                    "entity": {
+                        "aws_s3_bucket": {
+                            "reports": {
+                                "__end_line__": 30,
+                                "__start_line__": 28,
+                                "bucket": [
+                                    "plimsoll-fixture-insecure-reports"
+                                ],
+                                "__address__": "aws_s3_bucket.reports",
+                                "__provider_address__": "aws.default"
+                            }
+                        }
+                    },
+                    "evaluated_keys": [
+                        "resource_type",
+                        "logging"
+                    ]
+                },
+                "code_block": null,
+                "file_path": "\\main.tf",
+                "file_abs_path": "C:\\repo\\tests\\fixtures\\insecure_s3\\main.tf",
+                "repo_file_path": "/tests/fixtures/insecure_s3/main.tf",
+                "file_line_range": [
+                    28,
+                    30
+                ],
+                "resource": "aws_s3_bucket.reports",
+                "evaluations": null,
+                "check_class": "checkov.common.graph.checks_infra.base_check",
+                "fixed_definition": null,
+                "entity_tags": null,
+                "caller_file_path": null,
+                "caller_file_line_range": null,
+                "resource_address": null,
+                "severity": null,
+                "bc_category": null,
+                "benchmarks": null,
+                "description": null,
+                "short_description": null,
+                "vulnerability_details": null,
+                "connected_node": null,
+                "guideline": "https://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/s3-policies/s3-13-enable-logging",
+                "details": [],
+                "check_len": null,
+                "definition_context_file_path": "C:\\repo\\tests\\fixtures\\insecure_s3\\main.tf"
+            },
+            {
+                "check_id": "CKV2_AWS_61",
+                "bc_check_id": "BC_AWS_LOGGING_35",
+                "check_name": "Ensure that an S3 bucket has a lifecycle configuration",
+                "check_result": {
+                    "result": "FAILED",
+                    "entity": {
+                        "aws_s3_bucket": {
+                            "reports": {
+                                "__end_line__": 30,
+                                "__start_line__": 28,
+                                "bucket": [
+                                    "plimsoll-fixture-insecure-reports"
+                                ],
+                                "__address__": "aws_s3_bucket.reports",
+                                "__provider_address__": "aws.default"
+                            }
+                        }
+                    },
+                    "evaluated_keys": [
+                        "resource_type",
+                        "lifecycle_rule"
+                    ]
+                },
+                "code_block": null,
+                "file_path": "\\main.tf",
+                "file_abs_path": "C:\\repo\\tests\\fixtures\\insecure_s3\\main.tf",
+                "repo_file_path": "/tests/fixtures/insecure_s3/main.tf",
+                "file_line_range": [
+                    28,
+                    30
+                ],
+                "resource": "aws_s3_bucket.reports",
+                "evaluations": null,
+                "check_class": "checkov.common.graph.checks_infra.base_check",
+                "fixed_definition": null,
+                "entity_tags": null,
+                "caller_file_path": null,
+                "caller_file_line_range": null,
+                "resource_address": null,
+                "severity": null,
+                "bc_category": null,
+                "benchmarks": null,
+                "description": null,
+                "short_description": null,
+                "vulnerability_details": null,
+                "connected_node": null,
+                "guideline": "https://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/aws-logging-policies/bc-aws-2-61",
+                "details": [],
+                "check_len": null,
+                "definition_context_file_path": "C:\\repo\\tests\\fixtures\\insecure_s3\\main.tf"
+            },
+            {
+                "check_id": "CKV_AWS_21",
+                "bc_check_id": "BC_AWS_S3_16",
+                "check_name": "Ensure all data stored in the S3 bucket have versioning enabled",
+                "check_result": {
+                    "result": "FAILED",
+                    "entity": {
+                        "aws_s3_bucket": {
+                            "reports": {
+                                "__end_line__": 30,
+                                "__start_line__": 28,
+                                "bucket": [
+                                    "plimsoll-fixture-insecure-reports"
+                                ],
+                                "__address__": "aws_s3_bucket.reports",
+                                "__provider_address__": "aws.default"
+                            }
+                        }
+                    },
+                    "evaluated_keys": [
+                        "resource_type",
+                        "versioning_configuration/status",
+                        "versioning/enabled"
+                    ]
+                },
+                "code_block": null,
+                "file_path": "\\main.tf",
+                "file_abs_path": "C:\\repo\\tests\\fixtures\\insecure_s3\\main.tf",
+                "repo_file_path": "/tests/fixtures/insecure_s3/main.tf",
+                "file_line_range": [
+                    28,
+                    30
+                ],
+                "resource": "aws_s3_bucket.reports",
+                "evaluations": null,
+                "check_class": "checkov.common.graph.checks_infra.base_check",
+                "fixed_definition": null,
+                "entity_tags": null,
+                "caller_file_path": null,
+                "caller_file_line_range": null,
+                "resource_address": null,
+                "severity": null,
+                "bc_category": null,
+                "benchmarks": null,
+                "description": null,
+                "short_description": null,
+                "vulnerability_details": null,
+                "connected_node": null,
+                "guideline": "https://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/s3-policies/s3-16-enable-versioning",
+                "details": [],
+                "check_len": null,
+                "definition_context_file_path": "C:\\repo\\tests\\fixtures\\insecure_s3\\main.tf"
+            },
+            {
+                "check_id": "CKV_AWS_20",
+                "bc_check_id": "BC_AWS_S3_1",
+                "check_name": "S3 Bucket has an ACL defined which allows public READ access.",
+                "check_result": {
+                    "result": "FAILED",
+                    "entity": {
+                        "aws_s3_bucket": {
+                            "reports": {
+                                "__end_line__": 30,
+                                "__start_line__": 28,
+                                "bucket": [
+                                    "plimsoll-fixture-insecure-reports"
+                                ],
+                                "__address__": "aws_s3_bucket.reports",
+                                "__provider_address__": "aws.default"
+                            }
+                        }
+                    },
+                    "evaluated_keys": [
+                        "access_control_policy",
+                        "resource_type",
+                        "access_control_policy/grant/*/grantee/uri",
+                        "access_control_policy/grant",
+                        "acl"
+                    ]
+                },
+                "code_block": null,
+                "file_path": "\\main.tf",
+                "file_abs_path": "C:\\repo\\tests\\fixtures\\insecure_s3\\main.tf",
+                "repo_file_path": "/tests/fixtures/insecure_s3/main.tf",
+                "file_line_range": [
+                    28,
+                    30
+                ],
+                "resource": "aws_s3_bucket.reports",
+                "evaluations": null,
+                "check_class": "checkov.common.graph.checks_infra.base_check",
+                "fixed_definition": null,
+                "entity_tags": null,
+                "caller_file_path": null,
+                "caller_file_line_range": null,
+                "resource_address": null,
+                "severity": null,
+                "bc_category": null,
+                "benchmarks": null,
+                "description": null,
+                "short_description": null,
+                "vulnerability_details": null,
+                "connected_node": null,
+                "guideline": "https://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/s3-policies/s3-1-acl-read-permissions-everyone",
+                "details": [],
+                "check_len": null,
+                "definition_context_file_path": "C:\\repo\\tests\\fixtures\\insecure_s3\\main.tf"
+            },
+            {
+                "check_id": "CKV_AWS_145",
+                "bc_check_id": "BC_AWS_GENERAL_56",
+                "check_name": "Ensure that S3 buckets are encrypted with KMS by default",
+                "check_result": {
+                    "result": "FAILED",
+                    "entity": {
+                        "aws_s3_bucket": {
+                            "reports": {
+                                "__end_line__": 30,
+                                "__start_line__": 28,
+                                "bucket": [
+                                    "plimsoll-fixture-insecure-reports"
+                                ],
+                                "__address__": "aws_s3_bucket.reports",
+                                "__provider_address__": "aws.default"
+                            }
+                        }
+                    },
+                    "evaluated_keys": [
+                        "rule/apply_server_side_encryption_by_default/sse_algorithm",
+                        "server_side_encryption_configuration/rule/apply_server_side_encryption_by_default/sse_algorithm",
+                        "resource_type"
+                    ]
+                },
+                "code_block": null,
+                "file_path": "\\main.tf",
+                "file_abs_path": "C:\\repo\\tests\\fixtures\\insecure_s3\\main.tf",
+                "repo_file_path": "/tests/fixtures/insecure_s3/main.tf",
+                "file_line_range": [
+                    28,
+                    30
+                ],
+                "resource": "aws_s3_bucket.reports",
+                "evaluations": null,
+                "check_class": "checkov.common.graph.checks_infra.base_check",
+                "fixed_definition": null,
+                "entity_tags": null,
+                "caller_file_path": null,
+                "caller_file_line_range": null,
+                "resource_address": null,
+                "severity": null,
+                "bc_category": null,
+                "benchmarks": null,
+                "description": null,
+                "short_description": null,
+                "vulnerability_details": null,
+                "connected_node": null,
+                "guideline": "https://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/aws-general-policies/ensure-that-s3-buckets-are-encrypted-with-kms-by-default",
+                "details": [],
+                "check_len": null,
+                "definition_context_file_path": "C:\\repo\\tests\\fixtures\\insecure_s3\\main.tf"
+            },
+            {
+                "check_id": "CKV2_AWS_40",
+                "bc_check_id": "BC_AWS_IAM_73",
+                "check_name": "Ensure AWS IAM policy does not allow full IAM privileges",
+                "check_result": {
+                    "result": "FAILED",
+                    "entity": {
+                        "aws_iam_role_policy": {
+                            "reports_access": {
+                                "__end_line__": 74,
+                                "__start_line__": 60,
+                                "name": [
+                                    "plimsoll-fixture-reports-access"
+                                ],
+                                "policy": [
+                                    {
+                                        "Version": "2012-10-17",
+                                        "Statement": [
+                                            {
+                                                "Effect": "Allow",
+                                                "Action": "*",
+                                                "Resource": "*"
+                                            }
+                                        ]
+                                    }
+                                ],
+                                "role": [
+                                    "aws_iam_role.reports_reader.id"
+                                ],
+                                "__address__": "aws_iam_role_policy.reports_access",
+                                "__provider_address__": "aws.default"
+                            }
+                        }
+                    },
+                    "evaluated_keys": [
+                        "inline_policy/Statement[?(@/Effect == Allow)]/Action[*]",
+                        "policy/Statement[?(@/Effect == Allow)]/Action[*]",
+                        "statement[?(@/effect == Allow)]/actions[*]"
+                    ]
+                },
+                "code_block": null,
+                "file_path": "\\main.tf",
+                "file_abs_path": "C:\\repo\\tests\\fixtures\\insecure_s3\\main.tf",
+                "repo_file_path": "/tests/fixtures/insecure_s3/main.tf",
+                "file_line_range": [
+                    60,
+                    74
+                ],
+                "resource": "aws_iam_role_policy.reports_access",
+                "evaluations": null,
+                "check_class": "checkov.common.graph.checks_infra.base_check",
+                "fixed_definition": null,
+                "entity_tags": null,
+                "caller_file_path": null,
+                "caller_file_line_range": null,
+                "resource_address": null,
+                "severity": null,
+                "bc_category": null,
+                "benchmarks": null,
+                "description": null,
+                "short_description": null,
+                "vulnerability_details": null,
+                "connected_node": null,
+                "guideline": "https://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/aws-iam-policies/bc-aws-2-40",
+                "details": [],
+                "check_len": null,
+                "definition_context_file_path": "C:\\repo\\tests\\fixtures\\insecure_s3\\main.tf"
+            }
+        ]
+    },
+    "summary": {
+        "passed": 11,
+        "failed": 17,
+        "skipped": 0,
+        "parsing_errors": 0,
+        "resource_count": 5,
+        "checkov_version": "3.3.15"
+    }
+}

@@ -1,0 +1,476 @@
+[
+    {
+        "check_type": "terraform",
+        "results": {
+            "failed_checks": [
+                {
+                    "check_id": "CKV_AWS_41",
+                    "bc_check_id": "BC_AWS_SECRETS_5",
+                    "check_name": "Ensure no hard coded AWS access key and secret key exists in provider",
+                    "check_result": {
+                        "result": "FAILED",
+                        "evaluated_keys": []
+                    },
+                    "code_block": null,
+                    "file_path": "\\main.tf",
+                    "file_abs_path": "C:\\repo\\tests\\fixtures\\hardcoded_secret\\main.tf",
+                    "repo_file_path": "/tests/fixtures/hardcoded_secret/main.tf",
+                    "file_line_range": [
+                        1,
+                        5
+                    ],
+                    "resource": "aws.default",
+                    "evaluations": null,
+                    "check_class": "checkov.terraform.checks.provider.aws.credentials",
+                    "fixed_definition": null,
+                    "entity_tags": null,
+                    "caller_file_path": null,
+                    "caller_file_line_range": null,
+                    "resource_address": null,
+                    "severity": null,
+                    "bc_category": null,
+                    "benchmarks": null,
+                    "description": null,
+                    "short_description": null,
+                    "vulnerability_details": null,
+                    "connected_node": null,
+                    "guideline": "https://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/secrets-policies/bc-aws-secrets-5",
+                    "details": [],
+                    "check_len": null,
+                    "definition_context_file_path": "C:\\repo\\tests\\fixtures\\hardcoded_secret\\main.tf"
+                },
+                {
+                    "check_id": "CKV2_AWS_62",
+                    "bc_check_id": "BC_AWS_LOGGING_36",
+                    "check_name": "Ensure S3 buckets should have event notifications enabled",
+                    "check_result": {
+                        "result": "FAILED",
+                        "entity": {
+                            "aws_s3_bucket": {
+                                "b": {
+                                    "__end_line__": 9,
+                                    "__start_line__": 7,
+                                    "bucket": [
+                                        "x"
+                                    ],
+                                    "__address__": "aws_s3_bucket.b",
+                                    "__provider_address__": "aws.default"
+                                }
+                            }
+                        },
+                        "evaluated_keys": [
+                            "resource_type"
+                        ]
+                    },
+                    "code_block": null,
+                    "file_path": "\\main.tf",
+                    "file_abs_path": "C:\\repo\\tests\\fixtures\\hardcoded_secret\\main.tf",
+                    "repo_file_path": "/tests/fixtures/hardcoded_secret/main.tf",
+                    "file_line_range": [
+                        7,
+                        9
+                    ],
+                    "resource": "aws_s3_bucket.b",
+                    "evaluations": null,
+                    "check_class": "checkov.common.graph.checks_infra.base_check",
+                    "fixed_definition": null,
+                    "entity_tags": null,
+                    "caller_file_path": null,
+                    "caller_file_line_range": null,
+                    "resource_address": null,
+                    "severity": null,
+                    "bc_category": null,
+                    "benchmarks": null,
+                    "description": null,
+                    "short_description": null,
+                    "vulnerability_details": null,
+                    "connected_node": null,
+                    "guideline": "https://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/aws-logging-policies/bc-aws-2-62",
+                    "details": [],
+                    "check_len": null,
+                    "definition_context_file_path": "C:\\repo\\tests\\fixtures\\hardcoded_secret\\main.tf"
+                },
+                {
+                    "check_id": "CKV2_AWS_6",
+                    "bc_check_id": "BC_AWS_NETWORKING_52",
+                    "check_name": "Ensure that S3 bucket has a Public Access block",
+                    "check_result": {
+                        "result": "FAILED",
+                        "entity": {
+                            "aws_s3_bucket": {
+                                "b": {
+                                    "__end_line__": 9,
+                                    "__start_line__": 7,
+                                    "bucket": [
+                                        "x"
+                                    ],
+                                    "__address__": "aws_s3_bucket.b",
+                                    "__provider_address__": "aws.default"
+                                }
+                            }
+                        },
+                        "evaluated_keys": [
+                            "block_public_policy",
+                            "block_public_acls",
+                            "resource_type"
+                        ]
+                    },
+                    "code_block": null,
+                    "file_path": "\\main.tf",
+                    "file_abs_path": "C:\\repo\\tests\\fixtures\\hardcoded_secret\\main.tf",
+                    "repo_file_path": "/tests/fixtures/hardcoded_secret/main.tf",
+                    "file_line_range": [
+                        7,
+                        9
+                    ],
+                    "resource": "aws_s3_bucket.b",
+                    "evaluations": null,
+                    "check_class": "checkov.common.graph.checks_infra.base_check",
+                    "fixed_definition": null,
+                    "entity_tags": null,
+                    "caller_file_path": null,
+                    "caller_file_line_range": null,
+                    "resource_address": null,
+                    "severity": null,
+                    "bc_category": null,
+                    "benchmarks": null,
+                    "description": null,
+                    "short_description": null,
+                    "vulnerability_details": null,
+                    "connected_node": null,
+                    "guideline": "https://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/aws-networking-policies/s3-bucket-should-have-public-access-blocks-defaults-to-false-if-the-public-access-block-is-not-attached",
+                    "details": [],
+                    "check_len": null,
+                    "definition_context_file_path": "C:\\repo\\tests\\fixtures\\hardcoded_secret\\main.tf"
+                },
+                {
+                    "check_id": "CKV_AWS_18",
+                    "bc_check_id": "BC_AWS_S3_13",
+                    "check_name": "Ensure the S3 bucket has access logging enabled",
+                    "check_result": {
+                        "result": "FAILED",
+                        "entity": {
+                            "aws_s3_bucket": {
+                                "b": {
+                                    "__end_line__": 9,
+                                    "__start_line__": 7,
+                                    "bucket": [
+                                        "x"
+                                    ],
+                                    "__address__": "aws_s3_bucket.b",
+                                    "__provider_address__": "aws.default"
+                                }
+                            }
+                        },
+                        "evaluated_keys": [
+                            "logging",
+                            "resource_type"
+                        ]
+                    },
+                    "code_block": null,
+                    "file_path": "\\main.tf",
+                    "file_abs_path": "C:\\repo\\tests\\fixtures\\hardcoded_secret\\main.tf",
+                    "repo_file_path": "/tests/fixtures/hardcoded_secret/main.tf",
+                    "file_line_range": [
+                        7,
+                        9
+                    ],
+                    "resource": "aws_s3_bucket.b",
+                    "evaluations": null,
+                    "check_class": "checkov.common.graph.checks_infra.base_check",
+                    "fixed_definition": null,
+                    "entity_tags": null,
+                    "caller_file_path": null,
+                    "caller_file_line_range": null,
+                    "resource_address": null,
+                    "severity": null,
+                    "bc_category": null,
+                    "benchmarks": null,
+                    "description": null,
+                    "short_description": null,
+                    "vulnerability_details": null,
+                    "connected_node": null,
+                    "guideline": "https://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/s3-policies/s3-13-enable-logging",
+                    "details": [],
+                    "check_len": null,
+                    "definition_context_file_path": "C:\\repo\\tests\\fixtures\\hardcoded_secret\\main.tf"
+                },
+                {
+                    "check_id": "CKV2_AWS_61",
+                    "bc_check_id": "BC_AWS_LOGGING_35",
+                    "check_name": "Ensure that an S3 bucket has a lifecycle configuration",
+                    "check_result": {
+                        "result": "FAILED",
+                        "entity": {
+                            "aws_s3_bucket": {
+                                "b": {
+                                    "__end_line__": 9,
+                                    "__start_line__": 7,
+                                    "bucket": [
+                                        "x"
+                                    ],
+                                    "__address__": "aws_s3_bucket.b",
+                                    "__provider_address__": "aws.default"
+                                }
+                            }
+                        },
+                        "evaluated_keys": [
+                            "resource_type",
+                            "lifecycle_rule"
+                        ]
+                    },
+                    "code_block": null,
+                    "file_path": "\\main.tf",
+                    "file_abs_path": "C:\\repo\\tests\\fixtures\\hardcoded_secret\\main.tf",
+                    "repo_file_path": "/tests/fixtures/hardcoded_secret/main.tf",
+                    "file_line_range": [
+                        7,
+                        9
+                    ],
+                    "resource": "aws_s3_bucket.b",
+                    "evaluations": null,
+                    "check_class": "checkov.common.graph.checks_infra.base_check",
+                    "fixed_definition": null,
+                    "entity_tags": null,
+                    "caller_file_path": null,
+                    "caller_file_line_range": null,
+                    "resource_address": null,
+                    "severity": null,
+                    "bc_category": null,
+                    "benchmarks": null,
+                    "description": null,
+                    "short_description": null,
+                    "vulnerability_details": null,
+                    "connected_node": null,
+                    "guideline": "https://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/aws-logging-policies/bc-aws-2-61",
+                    "details": [],
+                    "check_len": null,
+                    "definition_context_file_path": "C:\\repo\\tests\\fixtures\\hardcoded_secret\\main.tf"
+                },
+                {
+                    "check_id": "CKV_AWS_21",
+                    "bc_check_id": "BC_AWS_S3_16",
+                    "check_name": "Ensure all data stored in the S3 bucket have versioning enabled",
+                    "check_result": {
+                        "result": "FAILED",
+                        "entity": {
+                            "aws_s3_bucket": {
+                                "b": {
+                                    "__end_line__": 9,
+                                    "__start_line__": 7,
+                                    "bucket": [
+                                        "x"
+                                    ],
+                                    "__address__": "aws_s3_bucket.b",
+                                    "__provider_address__": "aws.default"
+                                }
+                            }
+                        },
+                        "evaluated_keys": [
+                            "versioning/enabled",
+                            "resource_type",
+                            "versioning_configuration/status"
+                        ]
+                    },
+                    "code_block": null,
+                    "file_path": "\\main.tf",
+                    "file_abs_path": "C:\\repo\\tests\\fixtures\\hardcoded_secret\\main.tf",
+                    "repo_file_path": "/tests/fixtures/hardcoded_secret/main.tf",
+                    "file_line_range": [
+                        7,
+                        9
+                    ],
+                    "resource": "aws_s3_bucket.b",
+                    "evaluations": null,
+                    "check_class": "checkov.common.graph.checks_infra.base_check",
+                    "fixed_definition": null,
+                    "entity_tags": null,
+                    "caller_file_path": null,
+                    "caller_file_line_range": null,
+                    "resource_address": null,
+                    "severity": null,
+                    "bc_category": null,
+                    "benchmarks": null,
+                    "description": null,
+                    "short_description": null,
+                    "vulnerability_details": null,
+                    "connected_node": null,
+                    "guideline": "https://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/s3-policies/s3-16-enable-versioning",
+                    "details": [],
+                    "check_len": null,
+                    "definition_context_file_path": "C:\\repo\\tests\\fixtures\\hardcoded_secret\\main.tf"
+                },
+                {
+                    "check_id": "CKV_AWS_145",
+                    "bc_check_id": "BC_AWS_GENERAL_56",
+                    "check_name": "Ensure that S3 buckets are encrypted with KMS by default",
+                    "check_result": {
+                        "result": "FAILED",
+                        "entity": {
+                            "aws_s3_bucket": {
+                                "b": {
+                                    "__end_line__": 9,
+                                    "__start_line__": 7,
+                                    "bucket": [
+                                        "x"
+                                    ],
+                                    "__address__": "aws_s3_bucket.b",
+                                    "__provider_address__": "aws.default"
+                                }
+                            }
+                        },
+                        "evaluated_keys": [
+                            "server_side_encryption_configuration/rule/apply_server_side_encryption_by_default/sse_algorithm",
+                            "resource_type",
+                            "rule/apply_server_side_encryption_by_default/sse_algorithm"
+                        ]
+                    },
+                    "code_block": null,
+                    "file_path": "\\main.tf",
+                    "file_abs_path": "C:\\repo\\tests\\fixtures\\hardcoded_secret\\main.tf",
+                    "repo_file_path": "/tests/fixtures/hardcoded_secret/main.tf",
+                    "file_line_range": [
+                        7,
+                        9
+                    ],
+                    "resource": "aws_s3_bucket.b",
+                    "evaluations": null,
+                    "check_class": "checkov.common.graph.checks_infra.base_check",
+                    "fixed_definition": null,
+                    "entity_tags": null,
+                    "caller_file_path": null,
+                    "caller_file_line_range": null,
+                    "resource_address": null,
+                    "severity": null,
+                    "bc_category": null,
+                    "benchmarks": null,
+                    "description": null,
+                    "short_description": null,
+                    "vulnerability_details": null,
+                    "connected_node": null,
+                    "guideline": "https://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/aws-general-policies/ensure-that-s3-buckets-are-encrypted-with-kms-by-default",
+                    "details": [],
+                    "check_len": null,
+                    "definition_context_file_path": "C:\\repo\\tests\\fixtures\\hardcoded_secret\\main.tf"
+                },
+                {
+                    "check_id": "CKV_AWS_144",
+                    "bc_check_id": "BC_AWS_GENERAL_72",
+                    "check_name": "Ensure that S3 bucket has cross-region replication enabled",
+                    "check_result": {
+                        "result": "FAILED",
+                        "entity": {
+                            "aws_s3_bucket": {
+                                "b": {
+                                    "__end_line__": 9,
+                                    "__start_line__": 7,
+                                    "bucket": [
+                                        "x"
+                                    ],
+                                    "__address__": "aws_s3_bucket.b",
+                                    "__provider_address__": "aws.default"
+                                }
+                            }
+                        },
+                        "evaluated_keys": [
+                            "replication_configuration/rules/*/status",
+                            "rule/*/status",
+                            "resource_type"
+                        ]
+                    },
+                    "code_block": null,
+                    "file_path": "\\main.tf",
+                    "file_abs_path": "C:\\repo\\tests\\fixtures\\hardcoded_secret\\main.tf",
+                    "repo_file_path": "/tests/fixtures/hardcoded_secret/main.tf",
+                    "file_line_range": [
+                        7,
+                        9
+                    ],
+                    "resource": "aws_s3_bucket.b",
+                    "evaluations": null,
+                    "check_class": "checkov.common.graph.checks_infra.base_check",
+                    "fixed_definition": null,
+                    "entity_tags": null,
+                    "caller_file_path": null,
+                    "caller_file_line_range": null,
+                    "resource_address": null,
+                    "severity": null,
+                    "bc_category": null,
+                    "benchmarks": null,
+                    "description": null,
+                    "short_description": null,
+                    "vulnerability_details": null,
+                    "connected_node": null,
+                    "guideline": "https://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/aws-general-policies/ensure-that-s3-bucket-has-cross-region-replication-enabled",
+                    "details": [],
+                    "check_len": null,
+                    "definition_context_file_path": "C:\\repo\\tests\\fixtures\\hardcoded_secret\\main.tf"
+                }
+            ]
+        },
+        "summary": {
+            "passed": 4,
+            "failed": 8,
+            "skipped": 0,
+            "parsing_errors": 0,
+            "resource_count": 1,
+            "checkov_version": "3.3.15"
+        }
+    },
+    {
+        "check_type": "secrets",
+        "results": {
+            "failed_checks": [
+                {
+                    "check_id": "CKV_SECRET_2",
+                    "bc_check_id": "BC_GIT_2",
+                    "check_name": "AWS Access Key",
+                    "check_result": {
+                        "result": "FAILED"
+                    },
+                    "code_block": null,
+                    "file_path": "/main.tf",
+                    "file_abs_path": "C:\\repo\\tests\\fixtures\\hardcoded_secret\\main.tf",
+                    "repo_file_path": "/tests/fixtures/hardcoded_secret/main.tf",
+                    "file_line_range": [
+                        3,
+                        4
+                    ],
+                    "resource": "25910f981e85ca04baf359199dd0bd4a3ae738b6",
+                    "evaluations": null,
+                    "check_class": "",
+                    "fixed_definition": null,
+                    "entity_tags": null,
+                    "caller_file_path": null,
+                    "caller_file_line_range": null,
+                    "resource_address": null,
+                    "severity": null,
+                    "bc_category": null,
+                    "benchmarks": null,
+                    "description": null,
+                    "short_description": null,
+                    "vulnerability_details": null,
+                    "connected_node": null,
+                    "guideline": "https://docs.prismacloud.io/en/enterprise-edition/policy-reference/secrets-policies/secrets-policy-index/git-secrets-2",
+                    "details": [],
+                    "check_len": null,
+                    "definition_context_file_path": null,
+                    "validation_status": "Unavailable",
+                    "added_commit_hash": "",
+                    "removed_commit_hash": "",
+                    "added_by": "",
+                    "removed_date": "",
+                    "added_date": ""
+                }
+            ]
+        },
+        "summary": {
+            "passed": 0,
+            "failed": 1,
+            "skipped": 0,
+            "parsing_errors": 0,
+            "resource_count": 1,
+            "checkov_version": "3.3.15"
+        }
+    }
+]
