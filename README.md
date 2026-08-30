@@ -162,6 +162,11 @@ The [adapter walkthrough](CONTRIBUTING.md#walkthrough-add-a-check-adapter) is co
 and the interface it targets is built and tested — [`terraform_validate.py`](src/plimsoll/checks/terraform_validate.py)
 is about 150 lines and is the reference implementation. Trivy and KICS are both open.
 
+**No cloud background?** [`ONBOARDING.md`](ONBOARDING.md) starts from what Terraform is
+and ends at a list of tasks sorted by how much domain knowledge each needs. Several need
+none — the reporters, the CLI, and the deduplication logic are plain Python over data
+structures that are already defined and tested.
+
 See [`CONTRIBUTING.md`](CONTRIBUTING.md), the [`good first issue`](https://github.com/trh-ds/plimsoll/labels/good%20first%20issue)
 label, and the [Code of Conduct](CODE_OF_CONDUCT.md). Security issues go through
 [private reporting](SECURITY.md) rather than the issue tracker.

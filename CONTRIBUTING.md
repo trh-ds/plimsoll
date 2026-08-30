@@ -3,11 +3,16 @@
 Thanks for looking. This project is designed to be contributed to in two specific
 shapes, and both are self-contained enough to finish in an evening.
 
-> **Current state: pre-alpha.** Phase 1 of `implementation_plan.md` is partly done —
-> the models, the gate, and one adapter (`terraform_validate`) exist. There is no CLI
-> yet, and the rule pack is not written. If you want to add an adapter now, the
-> interface it plugs into is real and tested; if you want to add a rule, the harness
-> for it does not exist yet, so open an issue first and we will sequence it.
+> **Current state: pre-alpha.** Phase 1 of `implementation_plan.md` is most of the way
+> done — the models, the gate, two adapters (`terraform_validate` and `checkov`),
+> deduplication, and a working `plimsoll scan` / `plimsoll doctor` all exist. The rule
+> pack is not written and neither is anything involving a model. If you want to add an
+> adapter now, the interface it plugs into is real and tested; if you want to add a rule,
+> the Rego harness does not exist yet, so open an issue first and we will sequence it.
+
+> **New to cloud infrastructure?** [`ONBOARDING.md`](ONBOARDING.md) explains what
+> Terraform is, what this project does and why, and lists tasks by how much domain
+> knowledge they need — several need none.
 
 ## What is most useful
 
