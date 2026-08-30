@@ -162,6 +162,28 @@ against it.
 - The `terraform validate` fixtures are still reconstructed rather than captured — no terraform on this machine. The checkov fixtures are real.
 - `Finding.raw` carries `file_abs_path` from the scanning machine. Not a secret, but it reaches provenance and should be considered when redaction is written.
 
+### 2026-08-30 — Real terraform, real fixtures, and the bug they found
+
+**Done:** installed terraform 1.15.8 and opa 1.20.1, re-captured every `terraform_validate` fixture from real runs, fixed the bug that exposed, and settled the `terraform plan` credentials question by testing it.
+
+**The bug.** `terraform validate` in an uninitialized workspace returns exactly one diagnostic — `Missing required provider`, no range, no snippet — and never reaches anything real in the file. The adapter mapped it to an ordinary HIGH finding, so a scan of a fresh CI checkout looked like a check that ran and found one problem while every actual violation stayed invisible. `SECURITY.md` calls that class of thing a vulnerability. It now raises `CheckExecutionError`, so the tool is excluded from `tooling` and the run reports that nothing was verified. The old slow test asserted only that findings was non-empty, so it passed on that useless diagnostic and would have gone on passing indefinitely.
+
+**Two more things the reconstructed fixtures had wrong:** the warning they used — "interpolation-only expressions are deprecated" — is not emitted by terraform 1.15 at all, and real warnings come from the provider and carry an `address` field, so the branch that prefers `address` over `snippet.context` had never been exercised by a real payload.
+
+**`terraform plan` needs no AWS and no emulator.** Tested end to end: with `access_key = "test"`, `secret_key = "test"`, and `skip_credentials_validation`, `skip_requesting_account_id`, `skip_metadata_api_check`, `skip_region_validation`, the chain `terraform init` → `plan -out` → `show -json` completes offline and produces plan JSON v1.2 with `resource_changes[].change.after.acl == "public-read"` — exactly what `opa eval` consumes. That closes the open question in this log and means the `terraform_plan` adapter needs no LocalStack or Floci.
+
+**On Floci** (github.com/floci-io/floci, MIT, 22.7k stars, created 2026-02-18): a LocalStack-Community alternative exposing an AWS-compatible endpoint on `localhost:4566`. It does not help here. It replaces the AWS *API endpoint*, not the *provider registry*, so it has no effect on `terraform init`, and `plan` already works without it. The place it would earn its keep is the Phase 0/5 benchmark harness, where DPIaC-Eval's deployment-success metric needs something to deploy against and LocalStack's useful tier is paid. Keeping it out of the gate also keeps distance from invariant 5 — a working local AWS one command away makes "never apply" much easier to erode.
+
+**Decisions:**
+
+- An adapter that cannot verify must fail, not report. Returning the one diagnostic terraform managed to emit would have been technically truthful and practically a lie.
+- The `terraform_plan` adapter will use dummy credentials with the `skip_*` flags. An emulator gets reconsidered only if a fixture needs a data source or existing state, which is when that path genuinely breaks.
+- Slow tests assert the specific rule class now, not merely that something was found. A slow test that passes on a "could not run" diagnostic is worse than no slow test, because it reads as coverage.
+
+**Unblocked:** `terraform_plan` and `opa` have a verified, offline, credential-free path to plan JSON. `opa eval` is confirmed working on Rego v1.
+
+**Still open:** nothing initializes the workspace for the user — `terraform_validate` reports that it could not run, which is honest but not yet helpful. Whether the adapter should offer to run `terraform init -backend=false` behind a flag is a decision for when the GitHub Action is built, since that is where the workflow can do it instead.
+
 ---
 
 ## Phase 2 — The loop

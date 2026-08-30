@@ -48,8 +48,19 @@ for what is a contract and what is not.
   add-a-check-adapter walkthrough, `CODE_OF_CONDUCT.md`, `SECURITY.md`, issue and pull
   request templates.
 
+### Fixed
+
+- **`terraform_validate` no longer reports an uninitialized workspace as a finding.**
+  Without `terraform init` there is no provider schema, so terraform returns only
+  "Missing required provider" and never reaches anything real in the file. The adapter
+  mapped that to a HIGH finding, which made a check that verified nothing look like one
+  that ran and found a single problem. It now raises, so the run reports that nothing was
+  verified.
+
 ### Changed
 
+- **`terraform validate` fixtures are captured from real runs**, terraform 1.15.8 with
+  `hashicorp/aws ~> 5.0`, replacing fixtures reconstructed from the documented schema.
 - **`Check.run` now takes a `CheckContext`** instead of `(workspace, config)`. The context
   carries the workspace, the config, and a memoized `plan_json()` so adapters that
   evaluate rules against `terraform plan` output can share one plan rather than each
@@ -72,6 +83,8 @@ for what is a contract and what is not.
   exit code 4 is not implemented.
 - `rule_map.py` covers only the checkov IDs verified against real output. Everything else
   is reported unclassified, at a severity below the default threshold.
+- `terraform_validate` needs the workspace initialized. It reports that it could not run
+  rather than guessing, but nothing initializes the workspace for you yet.
 - The bundled rule pack, the exception store, provenance records, and the reasoning loop
   are Phases 1–3 of [`implementation_plan.md`](implementation_plan.md) and do not exist.
 - The committed `terraform validate` fixtures were reconstructed from terraform's
