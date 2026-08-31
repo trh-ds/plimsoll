@@ -44,7 +44,54 @@ CHECKOV: dict[str, RuleMapping] = {
     "CKV_SECRET_2": RuleMapping("secret.hardcoded", Severity.CRITICAL),
 }
 
+class PolicyRule(NamedTuple):
+    severity: Severity
+    benchmark_refs: tuple[str, ...]
+
+
+# The bundled Rego pack. The `.rego` files carry the logic, the message, and the
+# remediation; severity and benchmark mapping live here, in Python, for the same reason
+# checkov's do: a severity a rule author can raise inside their own rule file is a
+# severity nobody reviews. `specifications.md` is the source for this table.
+#
+# Benchmark references are best-effort v0.1 mappings to CIS AWS Foundations v3.0. They
+# are recorded so a compliance reviewer can find the clause, not asserted as certified
+# coverage -- this project has not been through a CIS certification and does not claim to
+# have been.
+PLIMSOLL: dict[str, PolicyRule] = {
+    "iam.action.wildcard": PolicyRule(Severity.HIGH, ("CIS-AWS-1.16",)),
+    "iam.resource.wildcard": PolicyRule(Severity.HIGH, ("CIS-AWS-1.16",)),
+    "iam.trust.wildcard_principal": PolicyRule(Severity.CRITICAL, ("CIS-AWS-1.16",)),
+    "iam.policy.admin_attached": PolicyRule(Severity.HIGH, ("CIS-AWS-1.16",)),
+    "s3.acl.public": PolicyRule(Severity.CRITICAL, ("CIS-AWS-2.1.4",)),
+    "s3.public_access_block.missing": PolicyRule(Severity.HIGH, ("CIS-AWS-2.1.4",)),
+    "s3.encryption.missing": PolicyRule(Severity.HIGH, ("CIS-AWS-2.1.1",)),
+    "s3.versioning.disabled": PolicyRule(Severity.MEDIUM, ()),
+    "s3.logging.missing": PolicyRule(Severity.MEDIUM, ("CIS-AWS-3.6",)),
+    "sg.ingress.world_ssh": PolicyRule(Severity.CRITICAL, ("CIS-AWS-5.2",)),
+    "sg.ingress.world_rdp": PolicyRule(Severity.CRITICAL, ("CIS-AWS-5.2",)),
+    "sg.ingress.world_open": PolicyRule(Severity.HIGH, ("CIS-AWS-5.2",)),
+    "sg.ingress.all_ports": PolicyRule(Severity.HIGH, ("CIS-AWS-5.2",)),
+    "rds.encryption.missing": PolicyRule(Severity.HIGH, ("CIS-AWS-2.3.1",)),
+    "rds.public.enabled": PolicyRule(Severity.CRITICAL, ("CIS-AWS-2.3.3",)),
+    "rds.backup.disabled": PolicyRule(Severity.MEDIUM, ()),
+    "ebs.encryption.missing": PolicyRule(Severity.HIGH, ("CIS-AWS-2.2.1",)),
+    "secret.hardcoded": PolicyRule(Severity.CRITICAL, ()),
+    "provider.static_credentials": PolicyRule(Severity.CRITICAL, ("CIS-AWS-1.4",)),
+    "logging.cloudtrail.absent": PolicyRule(Severity.MEDIUM, ("CIS-AWS-3.1",)),
+}
+
 UNMAPPED_RULE_CLASS_PREFIX = "checkov"
+
+
+def plimsoll_rule(rule_class: str) -> PolicyRule:
+    """Severity and benchmark refs for a rule class from the Rego pack.
+
+    An unmapped class is a rule from someone's own `--policy-dir`, which is a supported
+    thing to have. It is reported at the same below-threshold default an unmapped checkov
+    check gets: visible, but not able to fail somebody else's build on its own.
+    """
+    return PLIMSOLL.get(rule_class, PolicyRule(Severity.MEDIUM, ()))
 
 
 def checkov_mapping(check_id: str) -> RuleMapping:
