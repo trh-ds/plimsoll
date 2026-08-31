@@ -136,6 +136,100 @@ class Finding(BaseModel):
         return self
 
 
+class Patch(BaseModel):
+    """A candidate fix. A *proposal*, never a verdict.
+
+    SPEC: `specifications.md` originally carried only `diff`, with the model asked to
+    emit a unified diff directly. It now carries `new_content` -- the complete corrected
+    file -- and `diff` is computed from it by `difflib`.
+
+    The reason is empirical rather than aesthetic: models produce unified diffs with
+    wrong hunk headers and drifting context lines often enough that a diff applier
+    becomes the component that fails, and every malformed diff burns a retry without
+    ever testing whether the model understood the rule. Whole-file output moves the
+    formatting burden onto code that cannot get it wrong. The diff is still what a human
+    reads and what provenance records.
+    """
+
+    target_finding_id: str
+    attempt: int = Field(ge=1)
+    files_touched: list[Path] = Field(default_factory=list)
+    new_content: str = ""
+    diff: str = ""
+    rationale: str = ""
+
+
+class PatchOutcome(StrEnum):
+    """How a patch fared against the re-run gate."""
+
+    VERIFIED = "verified"
+    REGRESSED = "regressed"
+    INEFFECTIVE = "ineffective"
+    INVALID = "invalid"
+
+
+class PatchVerification(BaseModel):
+    """The gate's judgement on a patch. Produced only by `core.verifier`."""
+
+    outcome: PatchOutcome
+    target_resolved: bool = False
+    new_findings: list[Finding] = Field(default_factory=list)
+    removed_findings: list[Finding] = Field(default_factory=list)
+    failure_reason: str | None = None
+
+
+class DecisionStatus(StrEnum):
+    """The outcome for one finding.
+
+    SPEC: `REPORTED` is not in `specifications.md`. It was added because the original
+    five statuses had no honest home for "a real violation, below `--fail-on`, never
+    sent to the model". `PASS` means no violation, which would have been a lie, and
+    `BLOCKED` means the run fails, which it does not. A tool whose entire thesis is that
+    silence must not read as success cannot mislabel its own output.
+    """
+
+    PASS = "PASS"
+    FIXED = "FIXED"
+    ESCALATED = "ESCALATED"
+    EXEMPTED = "EXEMPTED"
+    BLOCKED = "BLOCKED"
+    REPORTED = "REPORTED"
+
+
+class Decision(BaseModel):
+    """What happened to one finding.
+
+    Constructed only by `core.loop`. Never by a provider, never by a check.
+
+    `FIXED` is reachable only through `PatchVerification.outcome == VERIFIED`, and the
+    validator below enforces it. Invariants 1 and 3 are one assertion, not a convention:
+    without it, any future edit that sets `status` from a model's self-assessment would
+    pass review by looking reasonable.
+    """
+
+    finding: Finding
+    status: DecisionStatus
+    explanation: str | None = None
+    patch: Patch | None = None
+    verification: PatchVerification | None = None
+    attempts: int = 0
+    # `exception_ref` arrives with the exception store in Phase 3. Absent rather than
+    # stubbed: a field that is always None is a promise the code does not keep.
+
+    @model_validator(mode="after")
+    def _fixed_requires_verification(self) -> Decision:
+        if self.status is not DecisionStatus.FIXED:
+            return self
+        if self.verification is None or self.verification.outcome is not PatchOutcome.VERIFIED:
+            raise ValueError(
+                "Decision.status=FIXED requires a PatchVerification with outcome=verified. "
+                "Only the re-run gate can produce one."
+            )
+        if self.patch is None:
+            raise ValueError("Decision.status=FIXED requires the patch that was verified")
+        return self
+
+
 class ToolVersion(BaseModel):
     """An external tool that ran, and at what version. Feeds `ProvenanceRecord.tooling`."""
 
@@ -196,3 +290,36 @@ class GateResult(BaseModel):
 
     def findings_at_or_above(self, threshold: Severity) -> list[Finding]:
         return [f for f in self.findings if f.severity.meets(threshold)]
+
+
+class VerifyResult(BaseModel):
+    """One full `plimsoll verify` run: the gate result plus what was done about it.
+
+    `gate` is the original scan and is never mutated by the loop. Exit codes are derived
+    from `gate` and the decisions, never from anything a model said.
+    """
+
+    gate: GateResult
+    decisions: list[Decision] = Field(default_factory=list)
+    llm_used: bool = False
+    llm_description: str | None = None
+    # Why the model did not run, when it did not: `--no-llm`, unreachable provider,
+    # missing configuration. Printed, because degrading silently is the failure mode
+    # this project exists to prevent.
+    llm_unavailable_reason: str | None = None
+
+    def with_status(self, status: DecisionStatus) -> list[Decision]:
+        return [d for d in self.decisions if d.status is status]
+
+    @property
+    def fixed(self) -> list[Decision]:
+        return self.with_status(DecisionStatus.FIXED)
+
+    @property
+    def unresolved_at_or_above(self) -> list[Decision]:
+        """Decisions that still block the run: found, at or above threshold, not fixed."""
+        return [
+            d
+            for d in self.decisions
+            if d.status in (DecisionStatus.ESCALATED, DecisionStatus.BLOCKED)
+        ]
