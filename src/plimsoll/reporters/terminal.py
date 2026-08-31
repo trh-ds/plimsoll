@@ -38,6 +38,10 @@ def _header(result: GateResult) -> list[str]:
     A reader who skips everything else must still see whether anything was verified.
     """
     lines: list[str] = []
+    if result.timed_out:
+        # First line, not a footnote. Everything below it is partial, and a reader who
+        # scrolls to the summary and sees a small number has to know why it is small.
+        lines.append("TIMED OUT: the run budget expired. What follows is incomplete.")
     if result.tooling:
         ran = ", ".join(f"{t.name} {t.version}" if t.version else t.name for t in result.tooling)
         lines.append(f"Checks run: {ran}")
@@ -67,6 +71,8 @@ def render_terminal(result: GateResult, *, fail_on: Severity) -> str:
     blocking = result.findings_at_or_above(fail_on)
     lines.append(f"{len(result.findings)} finding(s), {len(blocking)} at or above {fail_on.value}.")
 
+    if result.timed_out:
+        lines.append("The run timed out: this is a partial scan and not a verification.")
     if not result.any_check_ran:
         lines.append("Nothing was verified: no check was able to run.")
 
@@ -126,6 +132,11 @@ def _decision_block(decision: Decision) -> list[str]:
 def render_verify_terminal(result: VerifyResult, *, fail_on: Severity) -> str:
     lines = _header(result.gate)
 
+    # The gate can finish inside the budget and the loop exhaust it afterwards, so this
+    # is checked on the run as well as on the gate result.
+    if result.timed_out and not result.gate.timed_out:
+        lines.insert(0, "TIMED OUT: the run budget expired. What follows is incomplete.")
+
     if result.llm_description:
         lines.append(f"Model: {result.llm_description}")
     if result.llm_unavailable_reason:
@@ -153,6 +164,11 @@ def render_verify_terminal(result: VerifyResult, *, fail_on: Severity) -> str:
     if expired:
         lines.append(f"{expired} exception(s) have expired and no longer exempt anything.")
 
+    if result.timed_out:
+        lines.append(
+            "The run timed out. Findings past the budget were never attempted, and this "
+            "is not a verification."
+        )
     if not result.gate.any_check_ran:
         lines.append("Nothing was verified: no check was able to run.")
 

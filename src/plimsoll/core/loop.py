@@ -26,6 +26,7 @@ from plimsoll.core.context import (
     build_explain_prompt,
     build_patch_prompt,
 )
+from plimsoll.core.deadline import Deadline
 from plimsoll.core.exceptions import ExceptionStore
 from plimsoll.core.gate import Gate
 from plimsoll.core.models import (
@@ -74,9 +75,16 @@ class VerifierLoop:
         self._max_findings = max_findings
         self._exceptions = exceptions or ExceptionStore()
 
-    def run(self, workspace: Path, *, explain_only: bool = False) -> VerifyResult:
-        gate_result = self._gate.run(workspace, self._config)
-        result = VerifyResult(gate=gate_result)
+    def run(
+        self,
+        workspace: Path,
+        *,
+        explain_only: bool = False,
+        deadline: Deadline | None = None,
+    ) -> VerifyResult:
+        budget = deadline or Deadline.none()
+        gate_result = self._gate.run(workspace, self._config, budget)
+        result = VerifyResult(gate=gate_result, timed_out=gate_result.timed_out)
 
         # Matched before anything else happens. An accepted violation must not cost a
         # token and must not leave the machine, and the only way to guarantee that is to
@@ -101,17 +109,23 @@ class VerifierLoop:
         ]
         targeted = {f.id for f in candidates[: self._max_findings]}
 
-        verifier = Verifier(self._gate, self._config)
+        verifier = Verifier(self._gate, self._config, budget)
         verifier.set_baseline(gate_result.findings)
 
         decisions: list[Decision] = []
         for finding in gate_result.findings:
             ref = refs[finding.id]
-            if finding.id not in targeted:
+            # Checked between findings. Everything past the budget still gets a decision
+            # -- untried, and therefore still blocking -- because dropping a finding
+            # because the clock ran out is the one thing a verification tool may not do.
+            if finding.id not in targeted or budget.expired:
+                result.timed_out = result.timed_out or budget.expired
                 decisions.append(self._untried(finding, ref))
                 continue
             result.llm_used = True
-            decisions.append(_attach(self._handle(workspace, finding, verifier, explain_only), ref))
+            decisions.append(
+                _attach(self._handle(workspace, finding, verifier, explain_only, budget), ref)
+            )
 
         result.decisions = decisions
         return result
@@ -138,6 +152,7 @@ class VerifierLoop:
         finding: Finding,
         verifier: Verifier,
         explain_only: bool,
+        budget: Deadline,
     ) -> Decision:
         redactor = Redactor()
         explanation = self._explain(workspace, finding, redactor)
@@ -149,7 +164,7 @@ class VerifierLoop:
                 explanation=explanation,
             )
 
-        return self._attempt_fixes(workspace, finding, verifier, redactor, explanation)
+        return self._attempt_fixes(workspace, finding, verifier, redactor, explanation, budget)
 
     def _explain(self, workspace: Path, finding: Finding, redactor: Redactor) -> str | None:
         assert self._provider is not None
@@ -168,6 +183,7 @@ class VerifierLoop:
         verifier: Verifier,
         redactor: Redactor,
         explanation: str | None,
+        budget: Deadline,
     ) -> Decision:
         assert self._provider is not None
         failure_reason: str | None = None
@@ -176,6 +192,10 @@ class VerifierLoop:
 
         # One initial attempt plus `max_retries` retries.
         for attempt in range(1, self._max_retries + 2):
+            # Between attempts, not mid-attempt: a half-killed gate run says nothing, and
+            # an attempt started on the last second of the budget cannot be judged.
+            if budget.expired:
+                break
             attempts = attempt
             try:
                 prompt = build_patch_prompt(finding, workspace, redactor, failure_reason)

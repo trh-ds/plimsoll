@@ -15,6 +15,7 @@ from typing import Annotated
 
 import typer
 
+from plimsoll.core.deadline import Deadline
 from plimsoll.core.exceptions import ExceptionEntry, ExceptionStore, ExceptionStoreError
 from plimsoll.core.gate import Gate, default_gate
 from plimsoll.core.loop import VerifierLoop
@@ -41,6 +42,14 @@ class ExitCode:
     FINDINGS = 1
     CONFIG_ERROR = 2
     NOTHING_RAN = 3
+    TIMED_OUT = 4
+
+
+DEFAULT_RUN_TIMEOUT_SECONDS = 600
+DEFAULT_CHECK_TIMEOUT_SECONDS = 120
+
+_TIMEOUT_HELP = "Whole-run budget in seconds."
+_CHECK_TIMEOUT_HELP = "Per-subprocess timeout in seconds, capped by --timeout."
 
 
 class OutputFormat(StrEnum):
@@ -57,9 +66,13 @@ app = typer.Typer(
 
 
 def _exit_code(result: GateResult, fail_on: Severity) -> int:
-    # Order matters. A run where nothing could be verified reports that, even when it
-    # collected no findings -- especially then. A broken toolchain must not be able to
-    # masquerade as a clean pass.
+    # Order matters, and timing out comes first: it is the reason the rest of the run is
+    # incomplete, so reporting anything else would bury the cause. A run where nothing
+    # could be verified reports that next, even when it collected no findings --
+    # especially then. A broken toolchain must not masquerade as a clean pass, and
+    # neither may a truncated one.
+    if result.timed_out:
+        return ExitCode.TIMED_OUT
     if not result.any_check_ran:
         return ExitCode.NOTHING_RAN
     if result.findings_at_or_above(fail_on):
@@ -73,6 +86,8 @@ def _verify_exit_code(result: VerifyResult, fail_on: Severity) -> int:
     Derived from `Decision.status`, which only `VerifierLoop` sets and which cannot be
     `FIXED` without a `PatchVerification` the gate produced.
     """
+    if result.timed_out:
+        return ExitCode.TIMED_OUT
     if not result.gate.any_check_ran:
         return ExitCode.NOTHING_RAN
     if result.unresolved_at_or_above:
@@ -80,16 +95,17 @@ def _verify_exit_code(result: VerifyResult, fail_on: Severity) -> int:
     return ExitCode.CLEAN
 
 
-def _validate_common(path: Path, policy_dir: Path | None, timeout: int) -> None:
+def _validate_common(path: Path, policy_dir: Path | None, timeout: int, check_timeout: int) -> None:
     if not path.is_dir():
         typer.echo(f"not a directory: {path}", err=True)
         raise typer.Exit(ExitCode.CONFIG_ERROR)
     if policy_dir is not None and not policy_dir.is_dir():
         typer.echo(f"policy directory does not exist: {policy_dir}", err=True)
         raise typer.Exit(ExitCode.CONFIG_ERROR)
-    if timeout <= 0:
-        typer.echo("--timeout must be greater than zero", err=True)
-        raise typer.Exit(ExitCode.CONFIG_ERROR)
+    for flag, value in (("--timeout", timeout), ("--check-timeout", check_timeout)):
+        if value <= 0:
+            typer.echo(f"{flag} must be greater than zero", err=True)
+            raise typer.Exit(ExitCode.CONFIG_ERROR)
 
 
 def _load_exceptions(path: Path) -> ExceptionStore:
@@ -140,16 +156,21 @@ def scan(
         Path | None,
         typer.Option("--policy-dir", help="Additional policy directory."),
     ] = None,
-    timeout: Annotated[int, typer.Option("--timeout", help="Per-check timeout in seconds.")] = 120,
+    timeout: Annotated[
+        int, typer.Option("--timeout", help=_TIMEOUT_HELP)
+    ] = DEFAULT_RUN_TIMEOUT_SECONDS,
+    check_timeout: Annotated[
+        int, typer.Option("--check-timeout", help=_CHECK_TIMEOUT_HELP)
+    ] = DEFAULT_CHECK_TIMEOUT_SECONDS,
 ) -> None:
     """Run the deterministic gate. No model is involved."""
-    _validate_common(path, policy_dir, timeout)
+    _validate_common(path, policy_dir, timeout, check_timeout)
 
     config = GateConfig(
         fail_on=fail_on,
-        check=CheckConfig(timeout_seconds=timeout, policy_dir=policy_dir),
+        check=CheckConfig(timeout_seconds=check_timeout, policy_dir=policy_dir),
     )
-    result = default_gate().run(path, config)
+    result = default_gate().run(path, config, Deadline(timeout))
 
     if output_format is OutputFormat.JSON:
         typer.echo(render_json(result, fail_on=fail_on))
@@ -164,12 +185,13 @@ def _run_loop(
     output_format: OutputFormat,
     policy_dir: Path | None,
     timeout: int,
+    check_timeout: int,
     no_llm: bool,
     max_retries: int,
     max_llm_findings: int,
     explain_only: bool,
 ) -> None:
-    _validate_common(path, policy_dir, timeout)
+    _validate_common(path, policy_dir, timeout, check_timeout)
     if max_retries < 0:
         typer.echo("--max-retries cannot be negative", err=True)
         raise typer.Exit(ExitCode.CONFIG_ERROR)
@@ -179,7 +201,7 @@ def _run_loop(
 
     config = GateConfig(
         fail_on=fail_on,
-        check=CheckConfig(timeout_seconds=timeout, policy_dir=policy_dir),
+        check=CheckConfig(timeout_seconds=check_timeout, policy_dir=policy_dir),
     )
     provider, reason = _resolve_provider(no_llm)
     gate: Gate = default_gate()
@@ -192,7 +214,7 @@ def _run_loop(
         max_findings=max_llm_findings,
         exceptions=_load_exceptions(path),
     )
-    result = loop.run(path, explain_only=explain_only)
+    result = loop.run(path, explain_only=explain_only, deadline=Deadline(timeout))
     if provider is None and reason:
         result.llm_unavailable_reason = reason
 
@@ -215,7 +237,12 @@ def verify(
     policy_dir: Annotated[
         Path | None, typer.Option("--policy-dir", help="Additional policy directory.")
     ] = None,
-    timeout: Annotated[int, typer.Option("--timeout", help="Per-check timeout in seconds.")] = 120,
+    timeout: Annotated[
+        int, typer.Option("--timeout", help=_TIMEOUT_HELP)
+    ] = DEFAULT_RUN_TIMEOUT_SECONDS,
+    check_timeout: Annotated[
+        int, typer.Option("--check-timeout", help=_CHECK_TIMEOUT_HELP)
+    ] = DEFAULT_CHECK_TIMEOUT_SECONDS,
     no_llm: Annotated[
         bool, typer.Option("--no-llm", help="Deterministic mode. Same as scan, with decisions.")
     ] = False,
@@ -238,6 +265,7 @@ def verify(
         output_format,
         policy_dir,
         timeout,
+        check_timeout,
         no_llm,
         max_retries,
         max_llm_findings,
@@ -257,7 +285,12 @@ def explain(
     policy_dir: Annotated[
         Path | None, typer.Option("--policy-dir", help="Additional policy directory.")
     ] = None,
-    timeout: Annotated[int, typer.Option("--timeout", help="Per-check timeout in seconds.")] = 120,
+    timeout: Annotated[
+        int, typer.Option("--timeout", help=_TIMEOUT_HELP)
+    ] = DEFAULT_RUN_TIMEOUT_SECONDS,
+    check_timeout: Annotated[
+        int, typer.Option("--check-timeout", help=_CHECK_TIMEOUT_HELP)
+    ] = DEFAULT_CHECK_TIMEOUT_SECONDS,
     max_llm_findings: Annotated[
         int, typer.Option("--max-llm-findings", help="Cap on findings sent to the model.")
     ] = 25,
@@ -269,6 +302,7 @@ def explain(
         output_format,
         policy_dir,
         timeout,
+        check_timeout,
         no_llm=False,
         max_retries=0,
         max_llm_findings=max_llm_findings,

@@ -133,6 +133,7 @@ def test_json_format_reports_what_ran(monkeypatch, tmp_path):
         "checks_ran": ["checkov"],
         "checks_skipped": 1,
         "checks_failed": 0,
+        "timed_out": False,
     }
     assert payload["checks_skipped"][0]["reason"] == "not on PATH"
     assert payload["findings"][0]["rule_class"] == "s3.acl.public"

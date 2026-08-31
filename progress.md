@@ -234,6 +234,20 @@ against it.
 
 **Exit criterion:** stable hash-verified provenance record, exception correctly attributed, no secret surviving redaction.
 
+### 2026-09-01 — The whole-run timeout and exit code 4
+
+**What changed:** `--timeout` is now the whole-run budget with a default of 600, as the CLI contract always said it was; `--check-timeout` (default 120) is the per-subprocess value `--timeout` used to mean. `VerifierLoop.run` and `Verifier` both take the run's `Deadline`, checked between findings and between patch attempts. `timed_out` maps to exit 4, checked ahead of every other condition, and both reporters lead with it.
+
+**Now unblocked:** running Plimsoll in CI without a hang. Six adapters and three retries per finding can sit inside every per-check timeout and still take twenty minutes, which reads as a hang and gets the job cancelled with no output at all.
+
+**Decision — exit 4 is checked first, ahead of exit 3.** Timing out is the reason the rest of the run is incomplete, so reporting anything else buries the cause. Both are non-zero and both mean "not verified", so either would be honest; 4 is the one that tells you what to do.
+
+**Surprise — a partial re-verification is more dangerous than no re-verification.** `Verifier.verify` already refused to judge a patch when no check ran. It did not refuse when *some* ran: the adapter that would have caught the regression may be exactly the one the budget cut off, and the patch would have reached a human labelled "verified". `after.timed_out` is now `INVALID`.
+
+**Decision — a finding past the budget still gets a decision.** Untried, and therefore still blocking. Dropping a finding because the clock ran out is the one thing a verification tool may not do.
+
+**Next:** provenance.
+
 ### 2026-09-01 — The exception store
 
 **What changed:** `core/exceptions.py` (`ExceptionEntry`, `ExceptionStore`), wired into `VerifierLoop.run` ahead of targeting, `plimsoll exceptions list | add | expire | prune`, and exemption-aware terminal and JSON reports. 19 new tests.

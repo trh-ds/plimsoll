@@ -17,7 +17,9 @@ def build_payload(result: GateResult, *, fail_on: Severity) -> dict[str, Any]:
     blocking = result.findings_at_or_above(fail_on)
     return {
         "fail_on": fail_on.value,
+        "timed_out": result.timed_out,
         "summary": {
+            "timed_out": result.timed_out,
             "findings": len(result.findings),
             "blocking": len(blocking),
             "checks_ran": [t.name for t in result.tooling],
@@ -37,8 +39,12 @@ def render_json(result: GateResult, *, fail_on: Severity) -> str:
 
 def build_verify_payload(result: VerifyResult, *, fail_on: Severity) -> dict[str, Any]:
     payload = build_payload(result.gate, fail_on=fail_on)
+    # The loop can exhaust the budget after every check finished, so the run's own flag
+    # wins over the gate's.
+    payload["timed_out"] = result.timed_out
     payload["summary"].update(
         {
+            "timed_out": result.timed_out,
             "fixed": len(result.fixed),
             "escalated": len(result.with_status(DecisionStatus.ESCALATED)),
             "exempted": len(result.exempted),

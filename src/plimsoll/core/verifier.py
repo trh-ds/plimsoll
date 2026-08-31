@@ -18,6 +18,7 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from plimsoll.core.context import ContextError, resolve_file
+from plimsoll.core.deadline import Deadline
 from plimsoll.core.gate import Gate
 from plimsoll.core.models import (
     Finding,
@@ -119,12 +120,15 @@ def _strip_fences(text: str) -> str:
 class Verifier:
     """Applies a patch to a scratch copy and re-runs the gate over it."""
 
-    def __init__(self, gate: Gate, config: GateConfig) -> None:
+    def __init__(self, gate: Gate, config: GateConfig, deadline: Deadline | None = None) -> None:
         # The same gate instance that produced the finding, and the same config. Passing
         # a fresh gate here would let the two runs diverge in adapter set or timeout,
         # and the comparison would stop meaning anything.
         self._gate = gate
         self._config = config
+        # The run's budget, not a fresh one. A re-verification that could outrun the
+        # whole-run timeout would make `--timeout` a promise about the first scan only.
+        self._deadline = deadline or Deadline.none()
         self._baseline: set[tuple[str, str, str]] = set()
 
     def set_baseline(self, findings: Iterable[Finding]) -> None:
@@ -155,6 +159,18 @@ class Verifier:
                 ),
             )
 
+        if after.timed_out:
+            # A partial re-run is the most dangerous result there is: the adapter that
+            # would have caught the regression may simply be the one that never ran, and
+            # a patch judged against half a gate would reach a human labelled "verified".
+            return PatchVerification(
+                outcome=PatchOutcome.INVALID,
+                failure_reason=(
+                    "the run budget expired part-way through re-verification, so only some "
+                    "checks judged this patch"
+                ),
+            )
+
         return self._classify(finding, before_target, after)
 
     def _gate_patched_workspace(self, workspace: Path, patch: Patch) -> GateResult:
@@ -169,7 +185,7 @@ class Verifier:
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_text(patch.new_content, encoding="utf-8")
 
-            return self._gate.run(scratch, self._config)
+            return self._gate.run(scratch, self._config, self._deadline)
 
     def _classify(
         self,
