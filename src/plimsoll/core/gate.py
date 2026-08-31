@@ -9,10 +9,14 @@ judge a patch. There is no lighter second gate.
 
 from __future__ import annotations
 
+import shutil
+import tempfile
+import weakref
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, TypeVar, cast
 
+from plimsoll.core.deadline import Deadline
 from plimsoll.core.models import (
     CheckConfig,
     FailedCheck,
@@ -24,6 +28,8 @@ from plimsoll.core.models import (
     ToolVersion,
 )
 
+T = TypeVar("T")
+
 
 class CheckExecutionError(RuntimeError):
     """An adapter could not complete: binary vanished, timed out, unparseable output.
@@ -33,24 +39,40 @@ class CheckExecutionError(RuntimeError):
     """
 
 
-PlanProvider = Callable[[Path, CheckConfig], Path | None]
+class CheckSkipped(Exception):
+    """An adapter is installed but had nothing to evaluate.
+
+    Distinct from `CheckExecutionError` because the two mean different things to a
+    reader: `opa` with no plan to evaluate did not fail, it never started. Recorded as a
+    `SkippedCheck` and excluded from `tooling`, so a run where only skipped adapters
+    were present still exits 3 rather than reporting clean.
+
+    Discovered at run time rather than at `is_available()`: whether a plan exists is not
+    knowable before the adapters that produce one have run.
+    """
+
+
+PlanProvider = Callable[["CheckContext"], Path | None]
 """Produces a `terraform plan` JSON file for a workspace, or None when it cannot.
 
 Injected into `Gate` rather than imported by it. The gate core does not know what
-terraform is, which is what lets a second IaC format reuse it later.
+terraform is, which is what lets a second IaC format reuse it later. It is handed the
+whole context because producing a plan needs the scratch directory and the run's
+remaining time budget, not just the workspace path.
 """
 
 
 class CheckContext:
     """What an adapter is handed for one run.
 
-    Carries the workspace and config, plus the plan artifact some adapters consume and
-    others ignore. `opa` evaluates Rego against `terraform plan` JSON that the
-    `terraform_plan` adapter produces; without a shared context the plan would be
-    computed twice, or the two adapters would disagree about the flags it was built with.
+    Carries the workspace, the config, a scratch directory, the run deadline, and the
+    plan artifact some adapters consume and others ignore. `opa` evaluates Rego against
+    `terraform plan` JSON that `terraform_plan` produces; without a shared context the
+    plan would be computed twice, or the two adapters would disagree about the flags it
+    was built with.
 
-    One instance per gate run, so the plan is produced at most once no matter how many
-    adapters ask for it.
+    One instance per gate run, so every shared artifact is produced at most once no
+    matter how many adapters ask for it.
     """
 
     def __init__(
@@ -58,13 +80,52 @@ class CheckContext:
         workspace: Path,
         config: CheckConfig,
         plan_provider: PlanProvider | None = None,
+        *,
+        scratch: Path | None = None,
+        deadline: Deadline | None = None,
     ) -> None:
         self.workspace = workspace
         self.config = config
+        self.deadline = deadline or Deadline.none()
         self._plan_provider = plan_provider
-        self._plan: Path | None = None
-        self._planned = False
-        self._plan_error: Exception | None = None
+        self._scratch = scratch
+        self._memo: dict[str, tuple[object, Exception | None]] = {}
+
+    @property
+    def scratch(self) -> Path:
+        """A writable directory for this run's artifacts.
+
+        Adapters never write to the workspace -- `plimsoll` reports, it does not edit
+        your repository -- so anything terraform insists on producing on disk (a
+        provider cache, a plan file) is produced here. Normally supplied and cleaned up
+        by `Gate.run`; created on demand for a context built directly.
+        """
+        if self._scratch is None:
+            self._scratch = Path(tempfile.mkdtemp(prefix="plimsoll-ctx-"))
+            weakref.finalize(self, shutil.rmtree, self._scratch, True)
+        return self._scratch
+
+    def once(self, key: str, factory: Callable[[], T]) -> T:
+        """Memoize one shared artifact for this run, including a failure to produce it.
+
+        Two adapters asking for the same expensive thing -- a `terraform init`, a plan --
+        must get the same answer, and the same exception when there is one. Otherwise
+        they can reach different conclusions about one workspace and the report contains
+        both.
+        """
+        cached = self._memo.get(key)
+        if cached is not None:
+            value, error = cached
+            if error is not None:
+                raise error
+            return cast(T, value)
+        try:
+            produced = factory()
+        except Exception as exc:
+            self._memo[key] = (None, exc)
+            raise
+        self._memo[key] = (produced, None)
+        return produced
 
     def plan_json(self) -> Path | None:
         """Path to the plan JSON, or None when no plan is available.
@@ -74,18 +135,10 @@ class CheckContext:
         for every adapter that asks, so two consumers cannot reach different conclusions
         about the same workspace.
         """
-        if self._plan_error is not None:
-            raise self._plan_error
-        if not self._planned:
-            self._planned = True
-            if self._plan_provider is None:
-                return None
-            try:
-                self._plan = self._plan_provider(self.workspace, self.config)
-            except Exception as exc:
-                self._plan_error = exc
-                raise
-        return self._plan
+        if self._plan_provider is None:
+            return None
+        provider = self._plan_provider
+        return self.once("plan_json", lambda: provider(self))
 
 
 class Check(Protocol):
@@ -140,9 +193,14 @@ def build_registered_checks() -> list[Check]:
 
 
 def default_gate() -> Gate:
-    # No plan provider yet: it arrives with `checks/terraform_plan.py`. Until then
-    # `ctx.plan_json()` is None and a plan-consuming adapter reports itself skipped.
-    return Gate(build_registered_checks())
+    """Every registered adapter, with terraform wired in as the plan provider.
+
+    Imported late so the gate core keeps no static dependency on terraform: a second
+    IaC format supplies a different provider and reuses everything here.
+    """
+    from plimsoll.checks.terraform_plan import plan_provider
+
+    return Gate(build_registered_checks(), plan_provider)
 
 
 def _describe(exc: BaseException) -> str:
@@ -205,14 +263,33 @@ class Gate:
     def checks(self) -> list[Check]:
         return list(self._checks)
 
-    def run(self, workspace: Path, config: GateConfig | None = None) -> GateResult:
+    def run(
+        self,
+        workspace: Path,
+        config: GateConfig | None = None,
+        deadline: Deadline | None = None,
+    ) -> GateResult:
         cfg = config or GateConfig()
-        # One context per run, so a plan is produced at most once however many
-        # adapters ask for it.
-        ctx = CheckContext(workspace, cfg.check, self._plan_provider)
+        budget = deadline or Deadline.none()
         result = GateResult()
-        for check in self._checks:
-            self._run_one(check, ctx, result)
+        # One context per run, so a plan is produced at most once however many adapters
+        # ask for it, and one scratch directory that is gone when the run is.
+        with tempfile.TemporaryDirectory(prefix="plimsoll-run-") as tmp:
+            ctx = CheckContext(
+                workspace,
+                cfg.check,
+                self._plan_provider,
+                scratch=Path(tmp),
+                deadline=budget,
+            )
+            for check in self._checks:
+                # Checked at the seam rather than mid-adapter: a half-killed subprocess
+                # tells us nothing, and the remaining checks would report against a
+                # workspace we stopped understanding.
+                if budget.expired:
+                    result.timed_out = True
+                    break
+                self._run_one(check, ctx, result)
         result.findings.sort(key=_sort_key)
         result.findings = _deduplicate(result.findings)
         return result
@@ -234,6 +311,9 @@ class Gate:
 
         try:
             findings = check.run(ctx)
+        except CheckSkipped as exc:
+            result.checks_skipped.append(SkippedCheck(name=check.name, reason=str(exc)))
+            return
         except Exception as exc:
             result.checks_failed.append(FailedCheck(name=check.name, error=_describe(exc)))
             return

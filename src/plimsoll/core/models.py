@@ -7,11 +7,14 @@ shape. Deviations from it that were made deliberately are marked `SPEC:` below.
 from __future__ import annotations
 
 import hashlib
+from datetime import date
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from plimsoll.core.redaction import redact
 
 
 class Severity(StrEnum):
@@ -102,8 +105,28 @@ def compute_finding_id(
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
 
 
+def _redact_deep(value: object) -> object:
+    """Redact every string inside a nested tool payload."""
+    if isinstance(value, str):
+        return redact(value)
+    if isinstance(value, dict):
+        return {k: _redact_deep(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_redact_deep(v) for v in value]
+    return value
+
+
 class Finding(BaseModel):
-    """One normalised violation, as produced by a `Check` adapter."""
+    """One normalised violation, as produced by a `Check` adapter.
+
+    SPEC: `specifications.md` describes `raw` as "unmodified tool output" and says
+    redaction runs before serialisation. It runs *at construction* instead. `raw` holds
+    whatever the tool chose to include, which for a hardcoded-credential finding is the
+    credential; that value then flows into the reporters, into provenance, and into
+    prompts. Redacting at each of those boundaries means a new boundary added later
+    leaks by default. Redacting once, here, means it cannot: there is no moment at which
+    an unredacted `Finding` exists.
+    """
 
     id: str = ""
     source: CheckSource
@@ -133,6 +156,15 @@ class Finding(BaseModel):
                 file=self.file,
                 line_start=self.line_start,
             )
+        return self
+
+    @model_validator(mode="after")
+    def _redact(self) -> Finding:
+        # Invariant 6, applied where it cannot be forgotten. Identity is computed from
+        # rule and location, never from `message` or `raw`, so redaction cannot change
+        # `id` or the dedup key.
+        self.message = redact(self.message)
+        self.raw = {key: _redact_deep(value) for key, value in self.raw.items()}
         return self
 
 
@@ -196,6 +228,29 @@ class DecisionStatus(StrEnum):
     REPORTED = "REPORTED"
 
 
+class ExceptionRef(BaseModel):
+    """The recorded exception a finding matched, attached to its `Decision`.
+
+    Carries the justification and approver rather than just an identifier, so a
+    provenance record answers "who accepted this, and why" without needing the
+    repository it came from.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    rule_class: str
+    resource_address: str
+    justification: str
+    approved_by: str
+    approved_in: str | None = None
+    created: date | None = None
+    expires: date | None = None
+    # An expired entry does not exempt anything. It is attached anyway, so the report can
+    # say "this lapsed on 2026-09-15" instead of silently re-raising a finding a reviewer
+    # believed was handled.
+    expired: bool = False
+
+
 class Decision(BaseModel):
     """What happened to one finding.
 
@@ -213,11 +268,29 @@ class Decision(BaseModel):
     patch: Patch | None = None
     verification: PatchVerification | None = None
     attempts: int = 0
-    # `exception_ref` arrives with the exception store in Phase 3. Absent rather than
-    # stubbed: a field that is always None is a promise the code does not keep.
+    exception_ref: ExceptionRef | None = None
+
+    @property
+    def exception_expired(self) -> bool:
+        """True when this finding matched an exception that has lapsed.
+
+        Reported as `EXPIRED_EXCEPTION` rather than folded into the ordinary finding
+        line: a reviewer who signed off on this deserves to be told the sign-off ran out,
+        not to rediscover the finding as if it were new.
+        """
+        return self.exception_ref is not None and self.exception_ref.expired
 
     @model_validator(mode="after")
     def _fixed_requires_verification(self) -> Decision:
+        if self.status is DecisionStatus.EXEMPTED:
+            # The mirror of the FIXED rule. `EXEMPTED` means a human accepted this in
+            # writing; without the reference there is no record of who, and the status
+            # would be indistinguishable from "we decided to ignore it".
+            if self.exception_ref is None:
+                raise ValueError("Decision.status=EXEMPTED requires the exception it matched")
+            if self.exception_ref.expired:
+                raise ValueError("an expired exception does not exempt a finding")
+            return self
         if self.status is not DecisionStatus.FIXED:
             return self
         if self.verification is None or self.verification.outcome is not PatchOutcome.VERIFIED:
@@ -282,6 +355,9 @@ class GateResult(BaseModel):
     tooling: list[ToolVersion] = Field(default_factory=list)
     checks_skipped: list[SkippedCheck] = Field(default_factory=list)
     checks_failed: list[FailedCheck] = Field(default_factory=list)
+    # The run hit `--timeout` and stopped at a seam. Whatever is below is partial, so the
+    # CLI exits 4 and never 0 -- partial verification is not verification.
+    timed_out: bool = False
 
     @property
     def any_check_ran(self) -> bool:
@@ -307,6 +383,9 @@ class VerifyResult(BaseModel):
     # missing configuration. Printed, because degrading silently is the failure mode
     # this project exists to prevent.
     llm_unavailable_reason: str | None = None
+    # Set when the run hit `--timeout`, here as well as on `gate`: the loop can exhaust
+    # the budget long after every check finished.
+    timed_out: bool = False
 
     def with_status(self, status: DecisionStatus) -> list[Decision]:
         return [d for d in self.decisions if d.status is status]
@@ -314,6 +393,10 @@ class VerifyResult(BaseModel):
     @property
     def fixed(self) -> list[Decision]:
         return self.with_status(DecisionStatus.FIXED)
+
+    @property
+    def expired_exceptions(self) -> list[Decision]:
+        return [d for d in self.decisions if d.exception_expired]
 
     @property
     def unresolved_at_or_above(self) -> list[Decision]:

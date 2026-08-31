@@ -1,4 +1,4 @@
-from pathlib import Path
+﻿from pathlib import Path
 
 import pytest
 
@@ -170,8 +170,8 @@ class PlanConsumer(FakeCheck):
 def test_plan_is_produced_once_however_many_adapters_ask():
     calls: list[Path] = []
 
-    def provider(workspace: Path, config: CheckConfig) -> Path:
-        calls.append(workspace)
+    def provider(ctx: CheckContext) -> Path:
+        calls.append(ctx.workspace)
         return Path("plan.json")
 
     consumers = [PlanConsumer("a", available()), PlanConsumer("b", available())]
@@ -192,7 +192,7 @@ def test_no_plan_provider_gives_none_rather_than_an_error():
 def test_plan_provider_failure_is_isolated_and_identical_for_every_consumer():
     attempts: list[int] = []
 
-    def provider(workspace: Path, config: CheckConfig) -> Path:
+    def provider(ctx: CheckContext) -> Path:
         attempts.append(1)
         raise OSError("terraform init failed")
 
@@ -209,7 +209,7 @@ def test_plan_provider_failure_is_isolated_and_identical_for_every_consumer():
 def test_context_plan_is_memoized_across_direct_calls():
     calls: list[int] = []
 
-    def provider(workspace: Path, config: CheckConfig) -> Path:
+    def provider(ctx: CheckContext) -> Path:
         calls.append(1)
         return Path("plan.json")
 
@@ -219,7 +219,7 @@ def test_context_plan_is_memoized_across_direct_calls():
 
 
 def test_context_reraises_the_same_plan_failure():
-    def provider(workspace: Path, config: CheckConfig) -> Path:
+    def provider(ctx: CheckContext) -> Path:
         raise RuntimeError("no credentials")
 
     ctx = CheckContext(WORKSPACE, CheckConfig(), provider)
@@ -287,7 +287,10 @@ def test_file_level_findings_are_never_merged():
     assert len(result.findings) == 2
 
 
+EVERY_ADAPTER = ["checkov", "opa", "terraform_plan", "terraform_validate"]
+
+
 def test_registry_exposes_every_adapter():
     assert "terraform_validate" in registered_names()
-    assert [c.name for c in build_registered_checks()] == ["checkov", "terraform_validate"]
-    assert [c.name for c in default_gate().checks] == ["checkov", "terraform_validate"]
+    assert [c.name for c in build_registered_checks()] == EVERY_ADAPTER
+    assert [c.name for c in default_gate().checks] == EVERY_ADAPTER
