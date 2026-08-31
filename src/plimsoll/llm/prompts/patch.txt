@@ -1,0 +1,35 @@
+You are fixing an infrastructure-as-code policy violation. A deterministic policy checker
+found it, and the same checker will re-run against your output. An answer that does not
+resolve the finding is discarded and never shown to a human, so there is no benefit to
+producing something that merely looks plausible.
+
+Rule: {rule_class}
+Reported by: {source} ({rule_id})
+Severity: {severity}
+Resource: {resource_address}
+Location: {location}
+
+Checker message:
+{message}
+{retry_block}
+Full current content of {file}:
+```hcl
+{file_content}
+```
+
+Return the complete, corrected content of {file}.
+
+Rules for your answer:
+- Output the whole file, from its first line to its last. Not a diff, not a fragment,
+  not only the block you changed.
+- No markdown fences, no commentary, no explanation before or after. The first character
+  of your answer is the first character of the file.
+- Change only what the rule requires. Leave every unrelated attribute, resource, comment,
+  and blank line exactly as it is.
+- Add a new resource only when the rule cannot be satisfied without one. When you do,
+  wire it to the existing resource by reference, not by repeating a literal.
+- Preserve the existing formatting and indentation style.
+- Never weaken, remove, or comment out another resource to make this rule pass.
+- A token like [REDACTED:1] is a credential that was removed before this reached you.
+  Copy such tokens through unchanged, exactly as written. Never invent a replacement
+  value and never renumber them.
