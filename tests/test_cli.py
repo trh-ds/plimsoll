@@ -259,3 +259,79 @@ def test_invalid_loop_flags_are_config_errors(monkeypatch, tmp_path, flag):
     use_gate(monkeypatch, [StubCheck("checkov", available())])
     result = runner.invoke(cli.app, ["verify", str(tmp_path), flag, "-1"])
     assert result.exit_code == 2
+
+
+def _exceptions_file(root: Path) -> Path:
+    path = root / ".plimsoll" / "exceptions.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def test_exceptions_list_on_an_empty_repository(tmp_path):
+    result = runner.invoke(cli.app, ["exceptions", "list", str(tmp_path)])
+    assert result.exit_code == 0
+    assert "No exceptions recorded" in result.output
+
+
+def test_exceptions_add_then_list_then_expire_then_prune(tmp_path):
+    added = runner.invoke(
+        cli.app,
+        [
+            "exceptions",
+            "add",
+            "--rule-class",
+            "s3.acl.public",
+            "--resource",
+            "aws_s3_bucket.reports",
+            "--justification",
+            "public docs site",
+            "--approved-by",
+            "trh-ds",
+            "--approved-in",
+            "PR #442",
+            str(tmp_path),
+        ],
+    )
+    assert added.exit_code == 0
+    assert _exceptions_file(tmp_path).is_file()
+
+    listed = runner.invoke(cli.app, ["exceptions", "list", str(tmp_path)])
+    assert "live" in listed.output
+    assert "public docs site" in listed.output
+
+    expired = runner.invoke(
+        cli.app,
+        [
+            "exceptions",
+            "expire",
+            "--rule-class",
+            "s3.acl.public",
+            "--resource",
+            "aws_s3_bucket.reports",
+            str(tmp_path),
+        ],
+    )
+    assert expired.exit_code == 0
+    assert "EXPIRED" in runner.invoke(cli.app, ["exceptions", "list", str(tmp_path)]).output
+
+    pruned = runner.invoke(cli.app, ["exceptions", "prune", str(tmp_path)])
+    assert pruned.exit_code == 0
+    assert "Pruned 1" in pruned.output
+    assert runner.invoke(cli.app, ["exceptions", "list", str(tmp_path)]).exit_code == 0
+
+
+def test_expiring_an_unknown_exception_is_a_config_error(tmp_path):
+    result = runner.invoke(
+        cli.app,
+        ["exceptions", "expire", "--rule-class", "a.b", "--resource", "c.d", str(tmp_path)],
+    )
+    assert result.exit_code == 2
+
+
+def test_a_malformed_exception_store_stops_verify(monkeypatch, tmp_path):
+    no_model(monkeypatch)
+    use_gate(monkeypatch, [StubCheck("checkov", available())])
+    _exceptions_file(tmp_path).write_text("- not a mapping\n", encoding="utf-8")
+
+    result = runner.invoke(cli.app, ["verify", str(tmp_path)])
+    assert result.exit_code == 2

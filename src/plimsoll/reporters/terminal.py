@@ -85,6 +85,21 @@ def _decision_block(decision: Decision) -> list[str]:
         f"           {finding.message}",
     ]
 
+    ref = decision.exception_ref
+    if ref is not None:
+        lines.append("")
+        if ref.expired:
+            # Said loudly. A reviewer who signed this off deserves to be told the
+            # sign-off lapsed, not to meet the finding again as though it were new.
+            when = f" on {ref.expires.isoformat()}" if ref.expires else ""
+            lines.append(
+                f"           EXPIRED EXCEPTION: {ref.approved_by}'s sign-off lapsed{when}."
+            )
+        else:
+            lines.append(f"           exempted by {ref.approved_by}: {ref.justification}")
+        if ref.approved_in:
+            lines.append(f"           approved in {ref.approved_in}")
+
     if decision.explanation:
         lines.append("")
         lines.append(_indent(decision.explanation))
@@ -130,8 +145,13 @@ def render_verify_terminal(result: VerifyResult, *, fail_on: Severity) -> str:
     blocking = len(result.unresolved_at_or_above)
     lines.append(
         f"{len(result.decisions)} finding(s): {fixed} fixed and verified, "
-        f"{escalated} escalated, {blocking} unresolved at or above {fail_on.value}."
+        f"{escalated} escalated, {len(result.exempted)} exempted, "
+        f"{blocking} unresolved at or above {fail_on.value}."
     )
+
+    expired = len(result.expired_exceptions)
+    if expired:
+        lines.append(f"{expired} exception(s) have expired and no longer exempt anything.")
 
     if not result.gate.any_check_ran:
         lines.append("Nothing was verified: no check was able to run.")

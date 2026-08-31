@@ -395,6 +395,10 @@ class VerifyResult(BaseModel):
         return self.with_status(DecisionStatus.FIXED)
 
     @property
+    def exempted(self) -> list[Decision]:
+        return self.with_status(DecisionStatus.EXEMPTED)
+
+    @property
     def expired_exceptions(self) -> list[Decision]:
         return [d for d in self.decisions if d.exception_expired]
 

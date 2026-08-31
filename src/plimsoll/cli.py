@@ -1,8 +1,6 @@
 """Typer entrypoint.
 
-`scan`, `verify`, `explain`, and `doctor`. `exceptions` needs the exception store, which
-is Phase 3, and a subcommand that exists but does nothing is worse than one that is
-honestly absent.
+`scan`, `verify`, `explain`, `exceptions`, and `doctor`.
 
 Exit codes come from the gate and the decisions, never from anything a model said.
 """
@@ -10,12 +8,14 @@ Exit codes come from the gate and the decisions, never from anything a model sai
 from __future__ import annotations
 
 import sys
+from datetime import date
 from enum import StrEnum
 from pathlib import Path
 from typing import Annotated
 
 import typer
 
+from plimsoll.core.exceptions import ExceptionEntry, ExceptionStore, ExceptionStoreError
 from plimsoll.core.gate import Gate, default_gate
 from plimsoll.core.loop import VerifierLoop
 from plimsoll.core.models import (
@@ -90,6 +90,20 @@ def _validate_common(path: Path, policy_dir: Path | None, timeout: int) -> None:
     if timeout <= 0:
         typer.echo("--timeout must be greater than zero", err=True)
         raise typer.Exit(ExitCode.CONFIG_ERROR)
+
+
+def _load_exceptions(path: Path) -> ExceptionStore:
+    """Read `.plimsoll/exceptions.yaml`, or exit 2.
+
+    A missing store is empty and silent. A malformed one is fatal: a typo that dropped
+    every entry would re-raise findings a reviewer signed off on, and the run would look
+    like the reviewer was wrong rather than like the file was.
+    """
+    try:
+        return ExceptionStore.load(path)
+    except ExceptionStoreError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(ExitCode.CONFIG_ERROR) from exc
 
 
 def _resolve_provider(no_llm: bool) -> tuple[LLMProvider | None, str | None]:
@@ -176,6 +190,7 @@ def _run_loop(
         provider,
         max_retries=max_retries,
         max_findings=max_llm_findings,
+        exceptions=_load_exceptions(path),
     )
     result = loop.run(path, explain_only=explain_only)
     if provider is None and reason:
@@ -259,6 +274,128 @@ def explain(
         max_llm_findings=max_llm_findings,
         explain_only=True,
     )
+
+
+exceptions_app = typer.Typer(
+    name="exceptions",
+    help="Inspect and edit the recorded exceptions in .plimsoll/exceptions.yaml.",
+    no_args_is_help=True,
+)
+app.add_typer(exceptions_app)
+
+_WORKSPACE = Annotated[Path, typer.Argument(help="Repository root holding .plimsoll/.")]
+
+
+def _open_store(path: Path) -> ExceptionStore:
+    if not path.is_dir():
+        typer.echo(f"not a directory: {path}", err=True)
+        raise typer.Exit(ExitCode.CONFIG_ERROR)
+    return _load_exceptions(path)
+
+
+def _describe_entry(entry: ExceptionEntry, today: date) -> str:
+    state = "EXPIRED" if entry.is_expired(today) else "live"
+    until = f", expires {entry.expires.isoformat()}" if entry.expires else ", no expiry"
+    return (
+        f"  {state:<8} {entry.rule_class:<34} {entry.resource_address}\n"
+        f"           {entry.justification}\n"
+        f"           approved by {entry.approved_by}"
+        f"{f' in {entry.approved_in}' if entry.approved_in else ''}{until}"
+    )
+
+
+@exceptions_app.command("list")
+def exceptions_list(path: _WORKSPACE = Path(".")) -> None:
+    """Show every recorded exception, marking the ones that have lapsed."""
+    store = _open_store(path)
+    if not store.entries:
+        typer.echo(f"No exceptions recorded in {ExceptionStore.path_for(path)}.")
+        return
+    today = date.today()
+    for entry in store.entries:
+        typer.echo(_describe_entry(entry, today))
+        typer.echo("")
+    expired = sum(1 for e in store.entries if e.is_expired(today))
+    typer.echo(f"{len(store.entries)} exception(s), {expired} expired.")
+
+
+@exceptions_app.command("add")
+def exceptions_add(
+    rule_class: Annotated[str, typer.Option("--rule-class", help="Exact rule class to exempt.")],
+    resource_address: Annotated[
+        str, typer.Option("--resource", help="Resource address; glob patterns are allowed.")
+    ],
+    justification: Annotated[
+        str, typer.Option("--justification", help="Why this violation is accepted.")
+    ],
+    approved_by: Annotated[str, typer.Option("--approved-by", help="Who accepted it.")],
+    approved_in: Annotated[
+        str | None, typer.Option("--approved-in", help="Where it was accepted, e.g. 'PR #442'.")
+    ] = None,
+    expires: Annotated[
+        str | None, typer.Option("--expires", help="ISO date the exception lapses on.")
+    ] = None,
+    path: _WORKSPACE = Path("."),
+) -> None:
+    """Record a new exception."""
+    store = _open_store(path)
+    try:
+        entry = ExceptionEntry(
+            rule_class=rule_class,
+            resource_address=resource_address,
+            justification=justification,
+            approved_by=approved_by,
+            approved_in=approved_in,
+            created=date.today(),
+            expires=date.fromisoformat(expires) if expires else None,
+        )
+    except ValueError as exc:
+        typer.echo(f"invalid exception: {exc}", err=True)
+        raise typer.Exit(ExitCode.CONFIG_ERROR) from exc
+
+    store.entries.append(entry)
+    typer.echo(f"Recorded {entry.rule_class} on {entry.resource_address} in {store.save()}.")
+
+
+@exceptions_app.command("expire")
+def exceptions_expire(
+    rule_class: Annotated[str, typer.Option("--rule-class", help="Rule class to expire.")],
+    resource_address: Annotated[
+        str, typer.Option("--resource", help="Resource address, matched exactly as written.")
+    ],
+    path: _WORKSPACE = Path("."),
+) -> None:
+    """End an exception today, without deleting the record of who approved it."""
+    store = _open_store(path)
+    today = date.today()
+    matched = [
+        e
+        for e in store.entries
+        if e.rule_class == rule_class and e.resource_address == resource_address
+    ]
+    if not matched:
+        typer.echo(f"no exception matches {rule_class} on {resource_address}", err=True)
+        raise typer.Exit(ExitCode.CONFIG_ERROR)
+
+    # `expires` is the day the exception lapses on, so today takes effect immediately.
+    store.entries = [
+        e.model_copy(update={"expires": today}) if e in matched else e for e in store.entries
+    ]
+    typer.echo(f"Expired {len(matched)} exception(s) as of {today.isoformat()} in {store.save()}.")
+
+
+@exceptions_app.command("prune")
+def exceptions_prune(path: _WORKSPACE = Path(".")) -> None:
+    """Delete expired entries."""
+    store = _open_store(path)
+    today = date.today()
+    keep = [e for e in store.entries if not e.is_expired(today)]
+    removed = len(store.entries) - len(keep)
+    if not removed:
+        typer.echo("Nothing to prune; no exception has expired.")
+        return
+    store.entries = keep
+    typer.echo(f"Pruned {removed} expired exception(s) from {store.save()}.")
 
 
 @app.command()

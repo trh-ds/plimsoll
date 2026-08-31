@@ -242,9 +242,7 @@ def _initialise(ctx: CheckContext) -> Path:
     )
     if completed.returncode != 0:
         detail = (completed.stderr or completed.stdout).strip()[:400]
-        raise CheckExecutionError(
-            f"`{BINARY} init` failed, so nothing could be verified: {detail}"
-        )
+        raise CheckExecutionError(f"`{BINARY} init` failed, so nothing could be verified: {detail}")
     return workdir
 
 

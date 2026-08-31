@@ -44,6 +44,7 @@ CHECKOV: dict[str, RuleMapping] = {
     "CKV_SECRET_2": RuleMapping("secret.hardcoded", Severity.CRITICAL),
 }
 
+
 class PolicyRule(NamedTuple):
     severity: Severity
     benchmark_refs: tuple[str, ...]

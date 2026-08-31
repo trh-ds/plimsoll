@@ -26,10 +26,12 @@ from plimsoll.core.context import (
     build_explain_prompt,
     build_patch_prompt,
 )
+from plimsoll.core.exceptions import ExceptionStore
 from plimsoll.core.gate import Gate
 from plimsoll.core.models import (
     Decision,
     DecisionStatus,
+    ExceptionRef,
     Finding,
     GateConfig,
     PatchOutcome,
@@ -40,6 +42,16 @@ from plimsoll.core.verifier import Verifier, build_patch
 from plimsoll.llm import LLMError, LLMProvider, LLMUnavailable
 
 log = logging.getLogger("plimsoll.loop")
+
+
+def _attach(decision: Decision, ref: ExceptionRef | None) -> Decision:
+    """Record the exception a finding matched, on a decision that is not `EXEMPTED`.
+
+    Only expired references reach here -- a live one short-circuits before any of this.
+    They are carried anyway so the report can say the sign-off lapsed rather than
+    presenting the finding as though nobody had ever looked at it.
+    """
+    return decision if ref is None else decision.model_copy(update={"exception_ref": ref})
 
 
 class VerifierLoop:
@@ -53,20 +65,28 @@ class VerifierLoop:
         *,
         max_retries: int = 2,
         max_findings: int = 25,
+        exceptions: ExceptionStore | None = None,
     ) -> None:
         self._gate = gate
         self._config = config
         self._provider = provider
         self._max_retries = max_retries
         self._max_findings = max_findings
+        self._exceptions = exceptions or ExceptionStore()
 
     def run(self, workspace: Path, *, explain_only: bool = False) -> VerifyResult:
         gate_result = self._gate.run(workspace, self._config)
         result = VerifyResult(gate=gate_result)
 
+        # Matched before anything else happens. An accepted violation must not cost a
+        # token and must not leave the machine, and the only way to guarantee that is to
+        # decide it before the finding is ever a candidate.
+        refs = {f.id: self._exceptions.match(f) for f in gate_result.findings}
+        exempt = {i for i, ref in refs.items() if ref is not None and not ref.expired}
+
         if self._provider is None:
             result.llm_unavailable_reason = "no model configured (--no-llm or unset provider)"
-            result.decisions = [self._untried(f) for f in gate_result.findings]
+            result.decisions = [self._untried(f, refs[f.id]) for f in gate_result.findings]
             return result
 
         result.llm_description = self._provider.describe()
@@ -74,7 +94,11 @@ class VerifierLoop:
         # Highest severity first, capped. When the cap bites, the findings that get
         # model attention are the ones that would block the merge -- not the first
         # twenty-five in file order.
-        candidates = [f for f in gate_result.findings if f.severity.meets(self._config.fail_on)]
+        candidates = [
+            f
+            for f in gate_result.findings
+            if f.id not in exempt and f.severity.meets(self._config.fail_on)
+        ]
         targeted = {f.id for f in candidates[: self._max_findings]}
 
         verifier = Verifier(self._gate, self._config)
@@ -82,11 +106,12 @@ class VerifierLoop:
 
         decisions: list[Decision] = []
         for finding in gate_result.findings:
+            ref = refs[finding.id]
             if finding.id not in targeted:
-                decisions.append(self._untried(finding))
+                decisions.append(self._untried(finding, ref))
                 continue
             result.llm_used = True
-            decisions.append(self._handle(workspace, finding, verifier, explain_only))
+            decisions.append(_attach(self._handle(workspace, finding, verifier, explain_only), ref))
 
         result.decisions = decisions
         return result
@@ -102,8 +127,10 @@ class VerifierLoop:
             return DecisionStatus.BLOCKED
         return DecisionStatus.REPORTED
 
-    def _untried(self, finding: Finding) -> Decision:
-        return Decision(finding=finding, status=self._untried_status(finding))
+    def _untried(self, finding: Finding, ref: ExceptionRef | None = None) -> Decision:
+        if ref is not None and not ref.expired:
+            return Decision(finding=finding, status=DecisionStatus.EXEMPTED, exception_ref=ref)
+        return _attach(Decision(finding=finding, status=self._untried_status(finding)), ref)
 
     def _handle(
         self,

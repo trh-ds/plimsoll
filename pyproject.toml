@@ -7,6 +7,7 @@ requires-python = ">=3.11"
 license = { text = "Apache-2.0" }
 dependencies = [
     "pydantic>=2.7",
+    "pyyaml>=6.0",
     "typer>=0.12",
 ]
 
@@ -25,6 +26,7 @@ dev = [
     "mypy>=1.11",
     "pytest>=8.0",
     "ruff>=0.6",
+    "types-pyyaml>=6.0",
 ]
 
 [tool.ruff]
@@ -36,7 +38,8 @@ target-version = "py311"
 select = ["E", "F", "I", "UP", "B", "SIM", "ANN", "RUF"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["ANN201", "ANN001"]
+# mypy only runs on src/; annotations in tests buy nothing and read as noise.
+"tests/*" = ["ANN"]
 
 [tool.mypy]
 strict = true

@@ -48,6 +48,24 @@ _No entries yet._
 
 ## Phase 1 — The gate
 
+### 2026-09-01 — The plan path, the OPA adapter, and the twenty-rule pack
+
+**What changed:** `core/deadline.py`, a `CheckContext` with a scratch directory and `once()` memoisation, `checks/terraform_cli.py`, `checks/terraform_plan.py`, `checks/opa.py`, `checks/locator.py`, the `PLIMSOLL` table in `checks/rule_map.py`, and the six-file Rego pack in `src/plimsoll/policies/`. Verified end to end against `tests/fixtures/insecure_s3`: init → plan → show → `opa eval` → rule pack → locator → terminal report → exit 1, eight findings, five at or above HIGH, each mapped to the right file and line.
+
+**Now unblocked:** the loop finally has something to reason about. Until this landed, findings came from `checkov` and `terraform validate` only, and the verified-fix rate could not be measured at all.
+
+**Decision — the rule pack lives in `src/plimsoll/policies/`, not a top-level `policies/`.** `CLAUDE.md` and `implementation_plan.md` both said top-level. A pack that does not ship inside the wheel is not bundled; a user who `uv tool install plimsoll` would get an adapter with no rules and a clean report on a broken workspace, which is the exact failure this project exists to prevent. `--policy-dir` still loads a user's own directory *alongside* the pack, never instead of it.
+
+**Decision — Rego says what is a violation, Python says how severe it is.** The `.rego` files emit a rule class, a message, and a remediation hint; `rule_map.PLIMSOLL` holds severity and benchmark references. A severity a rule author can raise inside their own rule file is a severity nobody reviews, and `--policy-dir` means rule authors are not always this project.
+
+**Surprise — plan JSON has no filenames and no line numbers.** It describes what will exist, not where it was written, which is right for evaluating policy and useless for reporting to a human or building a patch prompt. `checks/locator.py` maps addresses back to block headers by text search. A miss degrades to a file-level finding on a stably-sorted first file, which is also what makes `logging.cloudtrail.absent` — a rule about something the configuration does *not* contain — reportable at all.
+
+**Surprise — the AWS provider calls `sts:GetCallerIdentity` before it will plan anything.** Placeholder credentials are not enough: that call returns `InvalidClientTokenId` and the whole plan fails, which would have been reported as a finding about the user's configuration when it is really a fact about this machine having no AWS account. `terraform_cli.CREDENTIAL_OVERRIDE` writes a three-argument `provider "aws"` override into the throwaway copy, only when there are no real credentials *and* an un-aliased default provider block exists to merge into.
+
+**Surprise — `Finding.raw` is a secret-leak path that redaction-before-serialisation does not close.** `raw` holds whatever the tool chose to include, which for a hardcoded-credential finding is the credential, and it flows into reporters, provenance, and prompts. Redacting at each boundary means a boundary added later leaks by default. `Finding` now redacts `message` and `raw` in a model validator, so there is no moment at which an unredacted `Finding` exists. Identity is computed from rule and location, so this cannot move an `id`.
+
+**Next:** the exception store, then the whole-run timeout, then provenance.
+
 ### 2026-08-30 — Scaffold, models, gate, and the first adapter
 
 **Done:**
@@ -214,9 +232,25 @@ against it.
 
 ## Phase 3 — Memory and provenance
 
-_Not started._
-
 **Exit criterion:** stable hash-verified provenance record, exception correctly attributed, no secret surviving redaction.
+
+### 2026-09-01 — The exception store
+
+**What changed:** `core/exceptions.py` (`ExceptionEntry`, `ExceptionStore`), wired into `VerifierLoop.run` ahead of targeting, `plimsoll exceptions list | add | expire | prune`, and exemption-aware terminal and JSON reports. 19 new tests.
+
+**Now unblocked:** provenance, which has to serialise an exemption, and the SARIF and GitHub reporters, which have to render one.
+
+**Decision — matching happens before targeting, not after.** An exempted finding is decided before it is ever a candidate for the model. That is not an optimisation: an accepted violation must not cost a token and must not leave the machine. The test that asserts it hands the loop a provider that raises on any call at all.
+
+**Decision — `expires` is the day the exception lapses *on*, not its last valid day.** `is_expired` is `expires <= today`. This makes `plimsoll exceptions expire` take effect the moment it is run, and makes the ambiguous case fail closed. Erring the other way keeps a lapsed sign-off in force for one more day, which is the wrong direction for this tool.
+
+**Decision — `extra="forbid"` on `ExceptionEntry`.** A misspelled key that pydantic silently dropped would produce a file that looks like an exemption and is not. The person who wrote it would never find out.
+
+**Decision — exemptions apply to `verify`, not to `scan`.** `scan` reports findings; it has no decisions to attach an `ExceptionRef` to. `verify --no-llm` is the deterministic path that is exemption-aware, and it is what CI should run when the repository has a store.
+
+**Surprise — `fnmatch` folds case on Windows.** Terraform resource addresses are case-sensitive, so the same committed store would have exempted different findings on a developer's laptop than in CI. `fnmatchcase` throughout.
+
+**Next:** the whole-run timeout and exit code 4.
 
 ---
 

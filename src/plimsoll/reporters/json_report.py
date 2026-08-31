@@ -41,6 +41,8 @@ def build_verify_payload(result: VerifyResult, *, fail_on: Severity) -> dict[str
         {
             "fixed": len(result.fixed),
             "escalated": len(result.with_status(DecisionStatus.ESCALATED)),
+            "exempted": len(result.exempted),
+            "expired_exceptions": len(result.expired_exceptions),
             "unresolved_blocking": len(result.unresolved_at_or_above),
         }
     )
