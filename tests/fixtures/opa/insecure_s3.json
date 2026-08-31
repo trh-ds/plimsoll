@@ -45,20 +45,20 @@
               "rule_id": "PLIM_S3_003"
             },
             {
-              "message": "Policy allows \"*\" against every resource in the account. * can be scoped to an ARN.",
-              "remediation": "Replace \"*\" with the ARNs this policy is meant to cover.",
-              "resource_address": "aws_iam_role_policy.reports_access",
-              "resource_type": "aws_iam_role_policy",
-              "rule_class": "iam.resource.wildcard",
-              "rule_id": "PLIM_IAM_002"
-            },
-            {
               "message": "Policy allows the wildcard action \"*\". Anything holding this policy can perform every operation the wildcard covers, not the ones the application needs.",
               "remediation": "Replace the wildcard with the specific actions this principal calls.",
               "resource_address": "aws_iam_role_policy.reports_access",
               "resource_type": "aws_iam_role_policy",
               "rule_class": "iam.action.wildcard",
               "rule_id": "PLIM_IAM_001"
+            },
+            {
+              "message": "Resource is \"*\", so \"*\" applies to every resource in the account. This action can be scoped to an ARN.",
+              "remediation": "Replace \"*\" with the ARNs this policy is meant to cover.",
+              "resource_address": "aws_iam_role_policy.reports_access",
+              "resource_type": "aws_iam_role_policy",
+              "rule_class": "iam.resource.wildcard",
+              "rule_id": "PLIM_IAM_002"
             },
             {
               "message": "This configuration provisions 5 IAM or S3 resource(s) and no CloudTrail. Without one there is no record of who used them.",

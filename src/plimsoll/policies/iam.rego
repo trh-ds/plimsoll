@@ -47,9 +47,11 @@ findings contains f if {
 		"rule_class": "iam.resource.wildcard",
 		"resource_address": r.address,
 		"resource_type": r.type,
+		# Phrased so it reads correctly when the action is itself "*", which the
+		# previous wording did not: "* can be scoped to an ARN" says nothing.
 		"message": sprintf(
-			"Policy allows %q against every resource in the account. %s can be scoped to an ARN.",
-			[action, action],
+			"Resource is \"*\", so %q applies to every resource in the account. This action can be scoped to an ARN.",
+			[action],
 		),
 		"remediation": "Replace \"*\" with the ARNs this policy is meant to cover.",
 	}
