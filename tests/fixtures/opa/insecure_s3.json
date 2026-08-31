@@ -1,0 +1,81 @@
+{
+  "result": [
+    {
+      "expressions": [
+        {
+          "value": [
+            {
+              "message": "Bucket ACL is \"public-read\", which makes its objects readable by anyone on the internet.",
+              "remediation": "Set the ACL to \"private\" and grant access through a bucket policy or IAM.",
+              "resource_address": "aws_s3_bucket_acl.reports",
+              "resource_type": "aws_s3_bucket_acl",
+              "rule_class": "s3.acl.public",
+              "rule_id": "PLIM_S3_001"
+            },
+            {
+              "message": "Bucket versioning status is \"Suspended\". An overwrite or delete is unrecoverable.",
+              "remediation": "Set versioning_configuration.status to \"Enabled\".",
+              "resource_address": "aws_s3_bucket_versioning.reports",
+              "resource_type": "aws_s3_bucket_versioning",
+              "rule_class": "s3.versioning.disabled",
+              "rule_id": "PLIM_S3_004"
+            },
+            {
+              "message": "No access logging is configured for this bucket, so reads of its objects leave no trail.",
+              "remediation": "Add an aws_s3_bucket_logging resource pointing at a log bucket.",
+              "resource_address": "aws_s3_bucket.reports",
+              "resource_type": "aws_s3_bucket",
+              "rule_class": "s3.logging.missing",
+              "rule_id": "PLIM_S3_005"
+            },
+            {
+              "message": "No aws_s3_bucket_public_access_block covers this bucket, so a later ACL or policy change can expose it without tripping any control.",
+              "remediation": "Add an aws_s3_bucket_public_access_block for this bucket with all four settings true.",
+              "resource_address": "aws_s3_bucket.reports",
+              "resource_type": "aws_s3_bucket",
+              "rule_class": "s3.public_access_block.missing",
+              "rule_id": "PLIM_S3_002"
+            },
+            {
+              "message": "No server-side encryption configuration is declared for this bucket.",
+              "remediation": "Add an aws_s3_bucket_server_side_encryption_configuration with AES256 or aws:kms.",
+              "resource_address": "aws_s3_bucket.reports",
+              "resource_type": "aws_s3_bucket",
+              "rule_class": "s3.encryption.missing",
+              "rule_id": "PLIM_S3_003"
+            },
+            {
+              "message": "Policy allows \"*\" against every resource in the account. * can be scoped to an ARN.",
+              "remediation": "Replace \"*\" with the ARNs this policy is meant to cover.",
+              "resource_address": "aws_iam_role_policy.reports_access",
+              "resource_type": "aws_iam_role_policy",
+              "rule_class": "iam.resource.wildcard",
+              "rule_id": "PLIM_IAM_002"
+            },
+            {
+              "message": "Policy allows the wildcard action \"*\". Anything holding this policy can perform every operation the wildcard covers, not the ones the application needs.",
+              "remediation": "Replace the wildcard with the specific actions this principal calls.",
+              "resource_address": "aws_iam_role_policy.reports_access",
+              "resource_type": "aws_iam_role_policy",
+              "rule_class": "iam.action.wildcard",
+              "rule_id": "PLIM_IAM_001"
+            },
+            {
+              "message": "This configuration provisions 5 IAM or S3 resource(s) and no CloudTrail. Without one there is no record of who used them.",
+              "remediation": "Add an aws_cloudtrail with a log bucket, or confirm the account already has an organisation trail covering it.",
+              "resource_address": "",
+              "resource_type": "",
+              "rule_class": "logging.cloudtrail.absent",
+              "rule_id": "PLIM_LOG_001"
+            }
+          ],
+          "text": "data.plimsoll.findings",
+          "location": {
+            "row": 1,
+            "col": 1
+          }
+        }
+      ]
+    }
+  ]
+}

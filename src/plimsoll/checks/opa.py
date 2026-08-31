@@ -57,9 +57,15 @@ def parse_version(stdout: str) -> str | None:
 def _values(payload: object) -> list[Mapping[str, Any]]:
     """Pull the rule results out of `opa eval --format json`.
 
-    The shape is `{"result": [{"expressions": [{"value": [...]}]}]}`. An undefined query
-    -- which is what a clean workspace produces -- emits `{}` with no `result` key at
-    all, and that is not an error.
+    The shape is `{"result": [{"expressions": [{"value": [...]}]}]}`.
+
+    A clean workspace produces `"value": []`, not an undefined query: `findings` is a
+    partial set rule, so it is always defined and simply empty. The bare `{}` with no
+    `result` key means the query resolved to nothing at all, which happens when the rule
+    package was never loaded -- a broken install rather than a clean scan. Both are
+    recorded here, both as recorded fixtures, because the second is exactly the case
+    that must not be reported as "no findings"; `is_available` is what refuses to run
+    without the bundled pack.
     """
     if not isinstance(payload, Mapping):
         raise CheckExecutionError("opa eval did not return a JSON object")

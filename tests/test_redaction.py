@@ -1,3 +1,7 @@
+import json
+from pathlib import Path
+
+from plimsoll.core.models import CheckSource, Finding, Severity
 from plimsoll.core.redaction import Redactor, contains_secret, redact
 
 PROVIDER_BLOCK = """
@@ -68,3 +72,63 @@ def test_invented_placeholder_is_left_alone():
     r = Redactor()
     r.redact('token = "AAAAAAAAAAAAAAAA"')
     assert r.restore("value = [REDACTED:9]") == "value = [REDACTED:9]"
+
+
+def test_a_credential_inside_finding_raw_is_gone_after_construction():
+    """Invariant 6, at the boundary it is actually reachable from.
+
+    `raw` holds whatever the tool chose to include. A checkov secrets finding or a
+    terraform plan diagnostic snippet both carry the offending source line, which for a
+    hardcoded credential *is* the credential.
+    """
+    finding = Finding(
+        source=CheckSource.TERRAFORM_PLAN,
+        rule_id="terraform_plan.bad",
+        rule_class="terraform.plan.bad",
+        severity=Severity.HIGH,
+        resource_address="provider.aws",
+        resource_type="",
+        file=Path("main.tf"),
+        line_start=4,
+        line_end=4,
+        message='secret_key = "AKIAIOSFODNN7EXAMPLE" is set inline',
+        raw={
+            "snippet": {"code": '  secret_key = "AKIAIOSFODNN7EXAMPLE"'},
+            "values": ["ghp_0123456789abcdefghij"],
+            "line": 4,
+        },
+    )
+
+    serialised = json.dumps(finding.model_dump(mode="json"))
+    assert "AKIAIOSFODNN7EXAMPLE" not in serialised
+    assert "ghp_0123456789abcdefghij" not in serialised
+    # Nested strings, list members, and non-strings all survive as structure.
+    assert finding.raw["line"] == 4
+    assert "[REDACTED]" in finding.raw["snippet"]["code"]
+
+
+def test_redaction_does_not_change_a_findings_identity():
+    """Identity is computed from rule and location, never from message or raw.
+
+    If it were not, redacting would move the id, and the same violation would look like
+    a different one between two runs of the same scan.
+    """
+
+    def build(message: str, raw: dict) -> Finding:
+        return Finding(
+            source=CheckSource.CHECKOV,
+            rule_id="CKV_SECRET_2",
+            rule_class="secret.hardcoded",
+            severity=Severity.CRITICAL,
+            resource_address="aws_db_instance.main",
+            resource_type="aws_db_instance",
+            file=Path("main.tf"),
+            line_start=12,
+            line_end=12,
+            message=message,
+            raw=raw,
+        )
+
+    clean = build("a credential is hardcoded", {})
+    leaky = build('password = "AKIAIOSFODNN7EXAMPLE"', {"code": "AKIAIOSFODNN7EXAMPLE"})
+    assert clean.id == leaky.id

@@ -48,6 +48,18 @@ _No entries yet._
 
 ## Phase 1 — The gate
 
+### 2026-09-01 — Recorded fixtures and tests for the plan and OPA path
+
+**What changed:** `tests/fixtures/opa/` and `tests/fixtures/terraform_plan/`, both captured from a real terraform 1.15.8 / opa 1.20.1 / hashicorp-aws 5.100.0 pipeline with the commands and versions recorded in a README beside them; `tests/test_opa.py`, `tests/test_terraform_plan.py`, `tests/test_locator.py`, `tests/test_terraform_cli.py`; and two more redaction tests. 325 unit tests, up from 263.
+
+**Now unblocked:** the largest gap in the tree is closed. Everything that landed on 2026-09-01 was exercised end to end by hand and by nothing else.
+
+**Surprise — a clean OPA run does not produce an undefined query.** The adapter's comment said `{}` with no `result` key was what a clean workspace looked like. It is not: `findings` is a partial set rule, always defined, so a clean run gives `"value": []`. The bare `{}` happens when the rule package was never loaded — a broken install, and the one case that must *not* read as "no findings". Both shapes are now recorded fixtures and the comment says what is true.
+
+**Confirmation — the plan diagnostic `snippet` carries the offending source line.** For a hardcoded-credential finding that line *is* the credential, and the adapter puts the whole diagnostic into `Finding.raw`. This is the concrete case that redaction-at-construction exists for, and there is now a test that puts a credential through it.
+
+**Surprise — the `compliant_s3` fixture is not compliant.** It trips `logging.cloudtrail.absent` at MEDIUM, so `scan` still exits 0 under the default `--fail-on high` and the smoke test in `CLAUDE.md` still passes. It is a genuine gap in the fixture, not the rule, and it is what the rule corpus in the next unit of work has to fix.
+
 ### 2026-09-01 — The plan path, the OPA adapter, and the twenty-rule pack
 
 **What changed:** `core/deadline.py`, a `CheckContext` with a scratch directory and `once()` memoisation, `checks/terraform_cli.py`, `checks/terraform_plan.py`, `checks/opa.py`, `checks/locator.py`, the `PLIMSOLL` table in `checks/rule_map.py`, and the six-file Rego pack in `src/plimsoll/policies/`. Verified end to end against `tests/fixtures/insecure_s3`: init → plan → show → `opa eval` → rule pack → locator → terminal report → exit 1, eight findings, five at or above HIGH, each mapped to the right file and line.
