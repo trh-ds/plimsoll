@@ -3,16 +3,7 @@
     {
       "expressions": [
         {
-          "value": [
-            {
-              "message": "This configuration provisions 11 IAM or S3 resource(s) and no CloudTrail. Without one there is no record of who used them.",
-              "remediation": "Add an aws_cloudtrail with a log bucket, or confirm the account already has an organisation trail covering it.",
-              "resource_address": "",
-              "resource_type": "",
-              "rule_class": "logging.cloudtrail.absent",
-              "rule_id": "PLIM_LOG_001"
-            }
-          ],
+          "value": [],
           "text": "data.plimsoll.findings",
           "location": {
             "row": 1,

@@ -98,10 +98,9 @@ def test_an_undefined_query_is_also_empty(workspace):
     assert parse_opa_output(payload("undefined_query"), workspace) == []
 
 
-def test_the_compliant_fixture_only_trips_the_account_level_rule(workspace):
-    findings = parse_opa_output(payload("compliant_s3"), workspace)
-    assert [f.rule_class for f in findings] == ["logging.cloudtrail.absent"]
-    assert all(f.severity is Severity.MEDIUM for f in findings)
+def test_the_compliant_fixture_trips_nothing(workspace):
+    # A rule that fires here is a false positive, which is what the fixture is for.
+    assert parse_opa_output(payload("compliant_s3"), workspace) == []
 
 
 def test_an_entry_with_no_rule_class_is_an_error(workspace):

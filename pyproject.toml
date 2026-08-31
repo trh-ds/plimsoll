@@ -20,6 +20,11 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/plimsoll"]
+# The Rego unit tests live beside the rules they test, which is what `opa test` expects.
+# They do not belong in a user's install: `opa eval --data <pack>` would load them on
+# every scan, and a shipped test package is a thing someone will eventually mistake for a
+# rule. `data.plimsoll.findings` is unaffected either way -- this is hygiene, not a fix.
+exclude = ["src/plimsoll/policies/*_test.rego"]
 
 [dependency-groups]
 dev = [

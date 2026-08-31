@@ -48,6 +48,20 @@ _No entries yet._
 
 ## Phase 1 — The gate
 
+### 2026-09-01 — The rule-pack corpus, and the false positive it found
+
+**What changed:** `tests/fixtures/rules/violating/` and `tests/fixtures/rules/compliant/` — one Terraform workspace each, five files by rule group; `tests/test_rule_corpus.py`, marked slow, asserting that every `rule_class` in `PLIMSOLL` fires against the first and none fires against the second; `policies/datastore_test.rego` and `policies/network_test.rego`, run by `opa test`; and a CloudTrail added to `tests/fixtures/compliant_s3`, which was not compliant.
+
+**Now unblocked:** adding a rule. `test_every_rule_class_in_the_pack_fires` fails when someone adds a row to `PLIMSOLL` and no fixture for it, which is the failure worth catching.
+
+**Decision — two directories, not forty.** Terraform merges every `.tf` in a directory into one configuration, so each side plans as a unit and one `opa eval` sees all twenty classes. Forty directories would be forty provider blocks, forty `terraform init` runs, and forty places for a rule rename to be half-applied. `set(PLIMSOLL) - fired == set()` is also a stronger claim than forty independent tests.
+
+**Surprise — the pack had a false positive, and the compliant half found it on its first run.** The AWS provider types `encrypted` as a **string** on a launch template's block device, so plan JSON carries `"true"`, not `true`. `ebs.encryption.missing` compared to `true` and reported every correctly-encrypted launch template as unencrypted. Fixed with `device_encrypted`, which accepts both, and pinned by a regression test in `datastore_test.rego`. This is the entire argument for keeping a compliant corpus: a rule that fires is easy to write, and a rule that fires only when it should is the one a team leaves switched on.
+
+**Surprise — `tests/fixtures/compliant_s3` was not compliant.** It tripped `logging.cloudtrail.absent`. At MEDIUM that sat below the default threshold, so the documented smoke test still exited 0 and nothing looked wrong. A fixture named "compliant" that is not is worse than no fixture, because it is what everyone reads to learn what compliant means.
+
+**Decision — the Rego unit tests are hand-built inputs, and that is only safe here.** They assert what a rule does with a shape. The adapter fixtures assert what shape a tool actually emits, and only the second can be got wrong by writing it from documentation. `_test.rego` files are excluded from the wheel: `opa eval --data <pack>` would load them on every user's scan, and a shipped test package is something somebody will eventually mistake for a rule.
+
 ### 2026-09-01 — Recorded fixtures and tests for the plan and OPA path
 
 **What changed:** `tests/fixtures/opa/` and `tests/fixtures/terraform_plan/`, both captured from a real terraform 1.15.8 / opa 1.20.1 / hashicorp-aws 5.100.0 pipeline with the commands and versions recorded in a README beside them; `tests/test_opa.py`, `tests/test_terraform_plan.py`, `tests/test_locator.py`, `tests/test_terraform_cli.py`; and two more redaction tests. 325 unit tests, up from 263.

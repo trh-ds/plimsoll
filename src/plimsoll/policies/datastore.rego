@@ -73,7 +73,7 @@ findings contains f if {
 findings contains f if {
 	some r in lib.resources
 	some device in block_devices(r)
-	object.get(device, "encrypted", false) != true
+	not device_encrypted(device)
 	f := {
 		"rule_id": "PLIM_EBS_001",
 		"rule_class": "ebs.encryption.missing",
@@ -82,6 +82,18 @@ findings contains f if {
 		"message": "A block device attached here is not encrypted.",
 		"remediation": "Set encrypted = true on the block device configuration.",
 	}
+}
+
+# `encrypted` is a boolean on aws_ebs_volume and a **string** on a launch template's
+# block device -- the AWS provider types it that way, and plan JSON reports `"true"`.
+# Comparing to `true` alone reported every encrypted launch template as unencrypted.
+# Found by tests/fixtures/rules/compliant, which is what that corpus is for.
+device_encrypted(device) if object.get(device, "encrypted", false) == true
+
+device_encrypted(device) if {
+	value := object.get(device, "encrypted", false)
+	is_string(value)
+	lower(value) == "true"
 }
 
 block_devices(r) := devices if {

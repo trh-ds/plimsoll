@@ -123,3 +123,15 @@ resource "aws_iam_role_policy" "reports_access" {
     ]
   })
 }
+
+# logging.cloudtrail.absent -- the rule asks for an audit trail in any configuration that
+# provisions the IAM and S3 resources a trail exists to record. Without this the fixture
+# tripped one MEDIUM rule, which sat below the default --fail-on threshold and so kept
+# the exit code honest while still being a false positive on a fixture named "compliant".
+resource "aws_cloudtrail" "audit" {
+  name                          = "plimsoll-fixture-compliant-audit"
+  s3_bucket_name                = aws_s3_bucket.logs.id
+  include_global_service_events = true
+  is_multi_region_trail         = true
+  enable_log_file_validation    = true
+}
