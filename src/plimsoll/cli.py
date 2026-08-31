@@ -34,9 +34,13 @@ from plimsoll.core.provenance import (
 )
 from plimsoll.llm import LLMConfig, LLMError, LLMProvider, build_provider
 from plimsoll.reporters import (
+    render_github,
     render_json,
+    render_sarif,
     render_terminal,
+    render_verify_github,
     render_verify_json,
+    render_verify_sarif,
     render_verify_terminal,
 )
 
@@ -66,6 +70,24 @@ GeneratedByOption = Annotated[str | None, typer.Option("--generated-by", help=_G
 class OutputFormat(StrEnum):
     TERMINAL = "terminal"
     JSON = "json"
+    SARIF = "sarif"
+    GITHUB = "github"
+
+
+# One table rather than a chain of `if`s in three commands. Adding a format is a row.
+_GATE_RENDERERS = {
+    OutputFormat.TERMINAL: render_terminal,
+    OutputFormat.JSON: render_json,
+    OutputFormat.SARIF: render_sarif,
+    OutputFormat.GITHUB: render_github,
+}
+
+_VERIFY_RENDERERS = {
+    OutputFormat.TERMINAL: render_verify_terminal,
+    OutputFormat.JSON: render_verify_json,
+    OutputFormat.SARIF: render_verify_sarif,
+    OutputFormat.GITHUB: render_verify_github,
+}
 
 
 app = typer.Typer(
@@ -230,10 +252,7 @@ def scan(
             generated_by=generated_by,
         )
 
-    if output_format is OutputFormat.JSON:
-        typer.echo(render_json(result, fail_on=fail_on))
-    else:
-        typer.echo(render_terminal(result, fail_on=fail_on))
+    typer.echo(_GATE_RENDERERS[output_format](result, fail_on=fail_on))
     raise typer.Exit(_exit_code(result, fail_on))
 
 
@@ -287,10 +306,7 @@ def _run_loop(
             generated_by=generated_by,
         )
 
-    if output_format is OutputFormat.JSON:
-        typer.echo(render_verify_json(result, fail_on=fail_on))
-    else:
-        typer.echo(render_verify_terminal(result, fail_on=fail_on))
+    typer.echo(_VERIFY_RENDERERS[output_format](result, fail_on=fail_on))
     raise typer.Exit(_verify_exit_code(result, fail_on))
 
 

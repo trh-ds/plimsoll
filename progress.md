@@ -234,6 +234,22 @@ against it.
 
 **Exit criterion:** stable hash-verified provenance record, exception correctly attributed, no secret surviving redaction.
 
+### 2026-09-01 — SARIF and the PR comment
+
+**What changed:** `reporters/sarif.py` (SARIF 2.1.0), `reporters/github.py` (a Markdown PR comment), and `--format sarif|github` on `scan`, `verify`, and `explain`. The CLI now dispatches formats through a table rather than a chain of `if`s in three commands. 25 new tests.
+
+**Now unblocked:** Phase 4. The GitHub Action has something to emit.
+
+**Decision — SARIF `ruleId` is the rule class, not the tool's own ID.** A reviewer suppressing `s3.acl.public` in GitHub should not have to suppress it once for checkov and again for the bundled pack. The tool's ID stays on the result as `properties["tool-rule-id"]`, because that is what you search the tool's own documentation for.
+
+**Decision — MEDIUM maps to `warning`, not `error`.** The default is `--fail-on high`, so a SARIF level that failed a build the CLI would have passed makes the two disagree about the same run.
+
+**Surprise — `invocations[]` is the load-bearing part of the SARIF file, not `results[]`.** GitHub's code-scanning UI shows results. A run in which every adapter was missing produces an empty results list, and an empty results list there is indistinguishable from a clean workspace — which is precisely the failure this project exists to prevent, arriving through a UI rather than through the code. Skipped checks, failed checks, "nothing was verified", and "the run timed out" are all `toolExecutionNotifications`, and `executionSuccessful` is false for any of them.
+
+**Decision — an exempted finding uses SARIF's own `suppressions`.** The alert closes with the justification attached rather than sitting open forever next to a `.plimsoll/exceptions.yaml` entry saying it was accepted.
+
+**Surprise (in a test, not the code) — `Finding.id` keys on `rule_id`, not `rule_class`.** Three fixtures sharing a `rule_id`, resource address, file, and line collapsed to one id, and every reporter correctly treated them as the same finding. The id is right; the fixture was wrong.
+
 ### 2026-09-01 — Provenance
 
 **What changed:** `core/provenance.py` (`RepoContext`, `ModelIdentity`, `RunSummary`, `Signature`, `ProvenancePatch`, `ProvenanceDecision`, `ProvenanceRecord`), `core/schema.py` to regenerate `schemas/provenance-0.1.json`, and `--provenance` / `--generated-by` on `scan`, `verify`, and `explain`. 22 new tests.
