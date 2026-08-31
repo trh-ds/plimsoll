@@ -64,7 +64,9 @@ The primary user is the one to optimise for. The tertiary user is the one most l
 
 ## Non-functional requirements
 
-**NFR1 — Zero-cost operation.** The full loop must run end to end against a locally hosted model with no paid API key. This is a hard requirement, not an aspiration: a project only its author can afford to run gets no contributors.
+**NFR1 — Zero-cost, zero-hardware operation.** The full loop must run end to end with no paid API key *and* no GPU. This is a hard requirement, not an aspiration: a project only its author can afford to run gets no contributors, and neither does one only its author has the hardware to run.
+
+*Revised.* This originally required a **locally hosted** model. That satisfied the cost half and failed the hardware half — a laptop without a discrete GPU either cannot run a 7B model or runs it too slowly to wait for, which is most contributors' laptops. The requirement is now met by free-tier hosted endpoints, which need neither money nor hardware. Local inference stays supported for anyone who wants it, and is no longer assumed by any code path, test, or documented workflow.
 
 **NFR2 — Deterministic-only mode.** `--no-llm` must yield a working scanner. Provider unavailability degrades to this mode with a warning, never a failure or a pass.
 

@@ -67,12 +67,46 @@ Things Plimsoll deliberately does not do, which bound what can go wrong:
   credentials or LocalStack.
 - **`terraform apply` is never invoked.** Not in code, not in tests, not in fixtures.
   Plimsoll cannot create, modify, or destroy a cloud resource.
-- **No backend, no database, no dashboard.** Nothing is uploaded anywhere. Output is
+- **No backend, no database, no dashboard.** Nothing is uploaded to us. Output is
   stdout, files, and PR comments, and the exception store is a YAML file in your repo.
-- **No network access except the model provider you configure** — and the default
-  provider is a local Ollama instance, so the default configuration makes no outbound
-  connection at all. `--no-llm` makes that guarantee unconditional.
-- **Unit tests make no network calls.**
+- **No network access except the model provider you configure.** Plimsoll ships with no
+  default endpoint, so it cannot contact anything until you set `PLIMSOLL_LLM_BASE_URL`.
+  `plimsoll scan` never contacts a provider at all, and `--no-llm` makes that
+  unconditional for `verify` too.
+- **Never writes to your workspace.** `verify` copies the workspace to a temporary
+  directory, applies the patch there, and reports. Your files are not modified.
+- **Unit tests make no network calls**, loopback included. Provider behaviour is tested
+  against recorded responses with no socket opened.
+
+### What leaves your machine when you run `verify`
+
+This is the part worth reading before you point Plimsoll at a private repository.
+
+`verify` and `explain` send Terraform source to whatever endpoint you configured:
+`explain` sends the offending block, and `verify` sends the **whole file** containing the
+finding, because a model cannot return a corrected file it has not seen. That endpoint is
+yours to choose and yours to trust — Plimsoll has no opinion about it and no default.
+
+Three mitigations are built in:
+
+- **Everything passes through one redaction point.** `core/context.py` is the only place
+  workspace content becomes network payload, and every prompt is scrubbed by
+  `core/redaction.py` first. It matches keyed assignments (`secret_key = "..."`), AWS
+  access key ids, GitHub, Slack and OpenAI-style tokens, Google API keys, JWTs, and PEM
+  private key blocks. Redaction is deliberately over-eager: a false positive costs the
+  model some context, a false negative posts a live credential to a third party.
+- **`terraform.tfstate` is never sent**, at any size, for any finding. State holds every
+  attribute of every deployed resource in plaintext, generated passwords included.
+- **Files over 60,000 characters are refused** rather than truncated.
+
+Redaction is pattern-based, so it is a mitigation and not a guarantee. A credential in a
+shape none of those patterns match will be transmitted. If that is unacceptable for a
+given repository, `plimsoll scan` and `plimsoll verify --no-llm` do useful work without
+sending anything anywhere.
+
+A gap worth naming: `Finding.raw` retains the source snippet an adapter reported, and is
+not yet redacted on the reporting path. It is redacted on the prompt path. Closing that
+is part of the provenance work.
 
 ## Dependencies
 

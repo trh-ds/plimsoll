@@ -42,11 +42,17 @@ All invoked via `subprocess.run` with explicit timeouts, `check=False`, and JSON
 
 Checkov could be imported directly as a Python package and would be faster. It is still a subprocess, because a dependency conflict between Plimsoll's Checkov and the user's Checkov is a worse failure than a slow call.
 
-## HCL handling — `python-hcl2` for reading, `unidiff` for patching
+## HCL handling — no parser, no diff library
 
-Parsing HCL is needed only to locate the block that triggered a finding and to slice context for the prompt. `python-hcl2` is sufficient for that.
+**Both dependencies this section used to name were dropped when the loop was built, and neither turned out to be needed.**
 
-Patches are unified diffs applied with `unidiff`, not AST rewrites. Diffs are what a reviewer expects to see in a PR, what the model produces most reliably, and what fails loudly when malformed. An AST round-trip would reformat unrelated code and destroy comments — unacceptable for a tool whose output goes into someone else's repository.
+`python-hcl2` was for locating the block that triggered a finding, to slice context into the prompt. Brace counting does that in twenty lines. The block is context for a human-readable explanation, and the patch prompt gets the whole file anyway, so a parse-accurate boundary buys nothing a heuristic does not.
+
+`unidiff` was for applying model-authored diffs. The model now returns the complete corrected file and `difflib` computes the diff for display. Asking a model for a unified diff makes the diff applier the component that fails: hunk headers come back wrong, context lines drift, and every malformed diff burns a retry without testing whether the model understood the rule.
+
+The reasons for preferring diffs still hold — a diff is what a reviewer expects to see in a PR, and an AST round-trip would reformat unrelated code and destroy comments. That is why the diff is still what gets *shown*. It is just computed from two known strings rather than parsed from generated text.
+
+Both are still available if a later need is real. Neither is currently a dependency.
 
 ## LLM providers — thin adapter, no framework
 
@@ -55,15 +61,23 @@ class LLMProvider(Protocol):
     def complete(self, system: str, user: str, max_tokens: int) -> str: ...
 ```
 
-Implementations: `ollama`, `openai_compat`, `anthropic`, `null`. That is the entire abstraction. `openai_compat` covers Groq, Cerebras, OpenRouter, GitHub Models, vLLM, and LM Studio, because they all speak the same wire format.
+Implementations: `openai_compat` and `null`. That is the entire abstraction. `openai_compat` covers agent routers, Groq, Cerebras, OpenRouter, GitHub Models, vLLM, LM Studio, a local Ollama, and OpenAI itself, because they all speak the same wire format.
+
+Vendor-specific providers are deliberately **not** built. One adapter reaches every endpoint that matters, and a second one covering the same endpoints by a different route is a second thing to keep working. An endpoint speaking a genuinely different wire format gets its own module when someone needs it — that is roughly forty lines against the protocol.
+
+The transport is `urllib` from the standard library. A single POST does not justify a dependency, and every dependency in a security tool is one somebody has to audit.
 
 **Rejected: LangChain and LlamaIndex.** The project makes exactly two kinds of model call. A framework would add a large dependency tree, a moving API surface, and abstractions over a problem that does not have them. The orchestration logic here is a bounded retry loop — roughly forty lines, and it is the most important forty lines in the codebase. It should be readable, not delegated.
 
-**Rejected: instructor / structured-output libraries.** Prompts return prose or a diff. Neither needs schema-constrained decoding, and both need to work on small local models where constrained decoding support is uneven.
+**Rejected: instructor / structured-output libraries.** Prompts return prose or a file. Neither needs schema-constrained decoding, and both need to work on small models where constrained decoding support is uneven.
 
 ### Default configuration
 
-Ollama with `qwen2.5-coder:7b`. Free, local, no key, runs on 16GB RAM. This is the default because NFR1 says the full loop must work with no paid inference, and defaults are the honest test of that claim.
+`openai_compat`, pointed at whatever endpoint the user configures. There is no default model identifier and no default base URL: guessing one would either pick a vendor for the user or fail with a confusing error from somebody's router. `doctor` reports the model as missing until all of it is set, and `scan` keeps working meanwhile.
+
+**Hosted by default, not local.** An earlier revision made a local Ollama the default, on the grounds that it costs nothing. It also requires hardware most contributors do not have — a laptop with no discrete GPU either cannot run a 7B model or runs it slowly enough that nobody will wait. A tool a contributor cannot run is a tool they cannot contribute to, and that is a worse accessibility failure than the cost one.
+
+The zero-cost requirement survives intact by a different route: free-tier hosted endpoints, GitHub Models among them, run the full loop on any machine. Local inference remains fully supported — Ollama speaks this wire format — it is simply an option rather than an assumption.
 
 For CI, GitHub Models via `openai_compat` — free tier, and the project already lives inside GitHub Actions.
 
@@ -108,6 +122,11 @@ Free unlimited minutes on public repos. Jobs: lint + types, unit tests across Py
 
 Docker (optional, for the Action image), `uv`, and Python 3.11+. Terraform, Checkov, and OPA are optional — the test suite runs without them via recorded fixtures.
 
-Ollama is the only thing worth installing to exercise the full loop, and it is free.
+To exercise the full loop you need an OpenAI-compatible endpoint and three environment
+variables. A free-tier hosted endpoint is enough; so is a local Ollama if you have the
+hardware and prefer it.
+
+**No GPU is required to develop this project**, and the unit suite needs no model at all
+— provider behaviour is tested against recorded responses with no socket opened.
 
 **No AWS account is required to develop this project.** `terraform apply` is never called; `terraform plan` runs against dummy credentials or LocalStack. This is stated explicitly because the assumption that an AWS project needs an AWS bill is the most likely reason a contributor bounces.

@@ -28,20 +28,23 @@ These are not style preferences. Breaking one of them breaks the project's reaso
 
 ```
 src/plimsoll/
-  checks/         Check adapters (terraform_validate, terraform_plan, checkov, opa)
-  llm/            LLMProvider implementations (ollama, openai_compat, anthropic, null)
+  checks/         Check adapters (terraform_validate, checkov; terraform_plan and opa next)
+  llm/            LLMProvider implementations (openai_compat, null) + prompts/*.txt
   core/
     models.py     Pydantic schemas — Finding, Patch, Decision, ProvenanceRecord
     gate.py       Runs checks, aggregates findings
+    context.py    Builds every prompt; the single redacted egress point
+    verifier.py   Applies a patch to a scratch copy and re-runs the gate
     loop.py       The verify -> reason -> re-verify -> escalate loop
-    exceptions.py ExceptionStore
-    provenance.py Record construction and hashing
-  reporters/      github_pr, sarif, json, terminal
+    redaction.py  Secret patterns, one-way and reversible
+    exceptions.py ExceptionStore (not built)
+    provenance.py Record construction and hashing (not built)
+  reporters/      terminal, json_report; github_pr and sarif not built
   cli.py          Typer entrypoint
-policies/         Bundled Rego rules
+policies/         Bundled Rego rules (not created)
 tests/
   fixtures/       Terraform configs with known violations
-action/           Dockerfile + action.yml for the GitHub Action
+action/           Dockerfile + action.yml for the GitHub Action (not created)
 ```
 
 ## Commands
@@ -53,9 +56,18 @@ uv run pytest -m "not slow"   # skip tests that shell out to terraform
 uv run ruff check . --fix     # lint
 uv run ruff format .          # format
 uv run mypy src/              # types
-uv run plimsoll doctor                              # which external tools are installed
+uv run plimsoll doctor                              # which external tools and which model
 uv run plimsoll scan ./tests/fixtures/insecure_s3   # manual smoke test, exits 1
 uv run plimsoll scan ./tests/fixtures/compliant_s3  # the false-positive check, exits 0
+uv run plimsoll verify ./tests/fixtures/insecure_s3 # the full loop; needs PLIMSOLL_LLM_*
+```
+
+Model configuration is three environment variables. Any OpenAI-compatible endpoint:
+
+```bash
+PLIMSOLL_LLM_BASE_URL=https://your-router.example/v1
+PLIMSOLL_LLM_MODEL=your-model-id
+PLIMSOLL_LLM_API_KEY=...
 ```
 
 Run `ruff`, `mypy`, and `pytest` before declaring any task complete.
@@ -75,6 +87,8 @@ Run `ruff`, `mypy`, and `pytest` before declaring any task complete.
 - Do not add a web server, dashboard, or database. Output is stdout, files, and PR comments.
 - Do not add a second cloud or IaC format until the Terraform + AWS path is complete and benchmarked. Multi-cloud is the most common way this kind of project dies.
 - Do not hardcode a model name or provider anywhere outside `src/plimsoll/llm/`.
+- Do not make a GPU or a locally hosted model a requirement for any code path, test, or documented workflow. Most contributors do not have one, and a tool they cannot run is a tool they cannot contribute to. Hosted inference is the default; local is a supported option, never an assumption.
+- Do not send workspace content to a provider from anywhere except `core/context.py`. One egress point is the only reason redaction can be audited.
 - Do not widen a rule's scope to make a test pass. Fix the test fixture.
 
 ## Working style
