@@ -18,14 +18,15 @@ from __future__ import annotations
 
 import json
 import re
-import shutil
 import subprocess
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from plimsoll.checks import terraform_cli
 from plimsoll.checks.addresses import split_address
 from plimsoll.checks.severity_map import terraform_diagnostic_severity
+from plimsoll.checks.terraform_cli import BINARY, parse_version
 from plimsoll.core.gate import CheckContext, CheckExecutionError, register
 from plimsoll.core.models import (
     CheckSource,
@@ -33,8 +34,7 @@ from plimsoll.core.models import (
     ToolAvailability,
 )
 
-BINARY = "terraform"
-_VERSION_TIMEOUT_SECONDS = 30
+__all__ = ["BINARY", "TerraformValidateCheck", "parse_validate_output", "parse_version"]
 
 # `snippet.context` looks like: resource "aws_s3_bucket" "reports"
 _CONTEXT_RE = re.compile(r'^(?P<kind>resource|data)\s+"(?P<type>[^"]+)"\s+"(?P<name>[^"]+)"')
@@ -151,16 +151,24 @@ def parse_validate_output(payload: Mapping[str, Any]) -> list[Finding]:
     return [_finding_from_diagnostic(d) for d in entries]
 
 
-def parse_version(stdout: str) -> str | None:
-    """Read the version from `terraform version -json`. None when it cannot be read."""
+def probe() -> ToolAvailability:
+    """Shared by both terraform adapters: they are one binary reported once."""
+    executable = terraform_cli.executable()
+    if executable is None:
+        return ToolAvailability.missing(BINARY, f"{BINARY} not found on PATH")
     try:
-        payload = json.loads(stdout)
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(payload, dict):
-        return None
-    version = payload.get("terraform_version")
-    return str(version) if version else None
+        completed = subprocess.run(
+            [executable, "version", "-json"],
+            capture_output=True,
+            text=True,
+            timeout=terraform_cli.VERSION_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return ToolAvailability.missing(BINARY, f"could not execute {BINARY}: {exc}")
+    # An old terraform without `version -json` still validates; the version is just
+    # unknown, which provenance records honestly rather than treating as absence.
+    return ToolAvailability.ok(BINARY, parse_version(completed.stdout))
 
 
 @register("terraform_validate")
@@ -168,37 +176,14 @@ class TerraformValidateCheck:
     name = "terraform_validate"
 
     def is_available(self) -> ToolAvailability:
-        executable = shutil.which(BINARY)
-        if executable is None:
-            return ToolAvailability.missing(BINARY, f"{BINARY} not found on PATH")
-        try:
-            completed = subprocess.run(
-                [executable, "version", "-json"],
-                capture_output=True,
-                text=True,
-                timeout=_VERSION_TIMEOUT_SECONDS,
-                check=False,
-            )
-        except (OSError, subprocess.SubprocessError) as exc:
-            return ToolAvailability.missing(BINARY, f"could not execute {BINARY}: {exc}")
-        # An old terraform without `version -json` still validates; the version is just
-        # unknown, which provenance records honestly rather than treating as absence.
-        return ToolAvailability.ok(BINARY, parse_version(completed.stdout))
+        return probe()
 
     def run(self, ctx: CheckContext) -> list[Finding]:
         # No plan needed: validate reads the HCL directly, which is why it is the one
-        # check that works with no credentials and no provider download.
-        executable = shutil.which(BINARY)
-        if executable is None:
-            raise CheckExecutionError(f"{BINARY} disappeared from PATH between probe and run")
-        completed = subprocess.run(
-            [executable, "validate", "-json"],
-            cwd=ctx.workspace,
-            capture_output=True,
-            text=True,
-            timeout=ctx.config.timeout_seconds,
-            check=False,
-        )
+        # check that works with no credentials and no cloud contact. It does need the
+        # provider schema, which `terraform_cli.workdir` arranges without writing to
+        # the user's repository.
+        completed = terraform_cli.run_terraform(ctx, ["validate", "-json"])
         # Exit code 1 just means "invalid", which is the interesting case. Only
         # unparseable output is a failure.
         try:

@@ -1,4 +1,4 @@
-import json
+﻿import json
 import subprocess
 from pathlib import Path
 
@@ -145,7 +145,7 @@ def test_parse_version(stdout, expected):
 
 
 def test_unavailable_when_terraform_is_not_installed(monkeypatch):
-    monkeypatch.setattr(tv.shutil, "which", lambda _: None)
+    monkeypatch.setattr(tv.terraform_cli, "executable", lambda: None)
     availability = tv.TerraformValidateCheck().is_available()
 
     assert availability.available is False
@@ -154,7 +154,7 @@ def test_unavailable_when_terraform_is_not_installed(monkeypatch):
 
 
 def test_unavailable_when_terraform_cannot_execute(monkeypatch):
-    monkeypatch.setattr(tv.shutil, "which", lambda _: "/usr/bin/terraform")
+    monkeypatch.setattr(tv.terraform_cli, "executable", lambda: "/usr/bin/terraform")
     monkeypatch.setattr(
         tv.subprocess, "run", lambda *a, **k: (_ for _ in ()).throw(OSError("exec format error"))
     )
@@ -162,7 +162,7 @@ def test_unavailable_when_terraform_cannot_execute(monkeypatch):
 
 
 def test_available_reports_version(monkeypatch):
-    monkeypatch.setattr(tv.shutil, "which", lambda _: "/usr/bin/terraform")
+    monkeypatch.setattr(tv.terraform_cli, "executable", lambda: "/usr/bin/terraform")
     monkeypatch.setattr(
         tv.subprocess,
         "run",
@@ -174,27 +174,28 @@ def test_available_reports_version(monkeypatch):
     assert (availability.available, availability.version) == (True, "1.9.5")
 
 
+def fake_terraform(returncode: int, stdout: str, stderr: str = ""):
+    """Stand in for `terraform_cli.run_terraform`, which also skips `terraform init`."""
+
+    def run(ctx, args, **kwargs):
+        return subprocess.CompletedProcess(["terraform", *args], returncode, stdout, stderr)
+
+    return run
+
+
 def test_run_parses_stdout(monkeypatch, tmp_path):
     payload = (FIXTURES / "unsupported_argument.json").read_text(encoding="utf-8")
-    monkeypatch.setattr(tv.shutil, "which", lambda _: "/usr/bin/terraform")
-    monkeypatch.setattr(
-        tv.subprocess,
-        "run",
-        # Exit code 1 means "invalid", which is the case we care about.
-        lambda *a, **k: subprocess.CompletedProcess(a[0], 1, stdout=payload, stderr=""),
-    )
+    # Exit code 1 means "invalid", which is the case we care about.
+    monkeypatch.setattr(tv.terraform_cli, "run_terraform", fake_terraform(1, payload))
     findings = tv.TerraformValidateCheck().run(CheckContext(tmp_path, CheckConfig()))
     assert [f.rule_class for f in findings] == ["terraform.validate.unsupported_argument"]
 
 
 def test_run_raises_when_output_is_not_json(monkeypatch, tmp_path):
-    monkeypatch.setattr(tv.shutil, "which", lambda _: "/usr/bin/terraform")
     monkeypatch.setattr(
-        tv.subprocess,
-        "run",
-        lambda *a, **k: subprocess.CompletedProcess(
-            a[0], 1, stdout="", stderr="Error: Missing required argument"
-        ),
+        tv.terraform_cli,
+        "run_terraform",
+        fake_terraform(1, "", "Error: Missing required argument"),
     )
     with pytest.raises(CheckExecutionError, match="did not return JSON"):
         tv.TerraformValidateCheck().run(CheckContext(tmp_path, CheckConfig()))
@@ -202,7 +203,7 @@ def test_run_raises_when_output_is_not_json(monkeypatch, tmp_path):
 
 def test_gate_skips_the_adapter_on_a_machine_without_terraform(monkeypatch, tmp_path):
     """The unit suite must pass with no terraform installed."""
-    monkeypatch.setattr(tv.shutil, "which", lambda _: None)
+    monkeypatch.setattr(tv.terraform_cli, "executable", lambda: None)
     result = Gate([tv.TerraformValidateCheck()]).run(tmp_path)
 
     assert result.any_check_ran is False
@@ -239,18 +240,23 @@ def _require_terraform() -> tv.TerraformValidateCheck:
 
 
 @pytest.mark.slow
-def test_real_terraform_refuses_to_validate_an_uninitialised_workspace(tmp_path):
-    """The case that made this adapter lie before it was fixed.
+def test_uninitialised_workspace_is_initialised_without_being_written_to(tmp_path):
+    """An uninitialised workspace is handled, and stays uninitialised afterwards.
 
-    Without `terraform init` there is no provider schema, so terraform reports only that
-    it cannot proceed and never sees `encryption_enabled`. The adapter must fail rather
-    than pass that one diagnostic off as the file's findings.
+    This used to raise: without a provider schema terraform reports only that it cannot
+    proceed, and the adapter refused rather than passing that off as the file's findings.
+    It now initialises a throwaway copy instead, so the real diagnostic is reached. The
+    second half of the assertion is the part that matters -- `terraform init` writes
+    `.terraform/` and `.terraform.lock.hcl` into its working directory, and the user's
+    workspace must not be that directory.
     """
     check = _require_terraform()
     (tmp_path / "main.tf").write_text(CONFIG_WITH_A_BAD_ARGUMENT, encoding="utf-8")
 
-    with pytest.raises(CheckExecutionError, match="not initialised"):
-        check.run(CheckContext(tmp_path, CheckConfig()))
+    findings = check.run(CheckContext(tmp_path, CheckConfig(timeout_seconds=600)))
+
+    assert [f.rule_class for f in findings] == ["terraform.validate.unsupported_argument"]
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["main.tf"]
 
 
 @pytest.mark.slow
