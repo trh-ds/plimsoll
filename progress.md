@@ -188,9 +188,27 @@ against it.
 
 ## Phase 2 — The loop
 
-_Not started._
+**Exit criterion:** a verified patch produced against a real fixture with a hosted model, and a clean escalation on a fixture the model cannot fix. *(Revised: was "with a local 7B model" — see the decision below.)*
 
-**Exit criterion:** a verified patch produced against a real fixture with a local 7B model, and a clean escalation on a fixture the model cannot fix.
+### 2026-08-31 — The whole loop, and hosted inference by default
+
+**What changed:** `llm/` (provider protocol, `openai_compat`, `null`, the two prompts), `core/context.py`, `core/redaction.py`, `core/verifier.py`, `core/loop.py`, the `Patch`/`PatchVerification`/`Decision` models, `plimsoll verify` and `plimsoll explain`, and decision-aware reporters. 2,119 lines of source, 183 unit tests, all still passing with no external binary, no model, and no network.
+
+**Now unblocked:** the tool is an agent rather than a linter. Also unblocked: prompt iteration, because prompts are text files with a fake-provider test harness behind them (`tests/conftest.py`) that can script a model's answer and assert what the loop does with it.
+
+**Decision — hosted inference by default; no local model assumed anywhere.** The old default was Ollama with `qwen2.5-coder:7b`, on the reasoning in NFR1 that a project only its author can afford to run gets no contributors. That reasoning was right and the conclusion was half-wrong: it solved cost and ignored hardware. A laptop without a discrete GPU either cannot run a 7B model or runs it too slowly to wait for, and that is most contributors' laptops. A tool you cannot run is a tool you cannot contribute to, which is the same failure NFR1 was written to prevent, arriving by the other door. Zero-cost is now met by free-tier hosted endpoints, which need neither money nor hardware. Local inference still works — Ollama speaks the same wire format — it is just no longer an assumption. NFR1, `tech-stack.md`, `architecture.md`, and the README were updated rather than left to contradict the code.
+
+**Decision — the model returns whole files, not unified diffs.** `specifications.md` specified a diff. Models get hunk headers wrong and drift context lines, which makes the diff *applier* the component that fails; worse, every malformed diff burns a retry without ever testing whether the model understood the rule. Whole-file output moves the formatting burden onto `difflib`, which cannot get it wrong. The diff is still what a human reads and what provenance will record. Two planned dependencies fell out as a side effect — `python-hcl2` and `unidiff` are both unnecessary.
+
+**Surprise — `Finding.id` is the wrong key for comparing across a patch.** It includes `line_start`, which is correct for deduplication and quietly wrong here: a fix that inserts two lines shifts every finding below it, so an id comparison reports all of them as simultaneously removed and newly introduced. Every patch would have looked like a catastrophic regression. `finding_identity()` is line-independent for that reason.
+
+**Surprise — a verifier without a baseline can never verify anything in a real repository.** The first version treated any finding in the patched workspace as introduced by the patch. In a workspace with two problems, fixing one leaves the other, which reads as a regression, which discards a working fix. Recording what was already violated before any patch is not an optimisation; without it the component does not function on any input more complex than the test fixture.
+
+**Surprise — redaction has to be reversible.** Redacting prompts was straightforward. The consequence was not: the model returns a whole file containing the placeholder, and writing that back would hand the user a patch that silently destroys a live credential. `Redactor` numbers placeholders and restores them. An invented placeholder is deliberately *not* resolved — the patch then fails re-verification and never reaches a human, which beats guessing which secret was meant.
+
+**Still open:** no provider in this repository's history has talked to a live endpoint. Every path is tested against recorded payloads with no socket opened, per the no-network-in-unit-tests rule, but that is not the same as having worked. The first real run is where the retry-loop economics — how many attempts a real model needs, and what that costs — become measurable rather than assumed.
+
+**Still open:** the loop has little to reason about until the Rego pack exists. Findings come from `checkov` and `terraform validate` only, so the verified-fix rate cannot be measured yet and should not be guessed at.
 
 ---
 
@@ -224,7 +242,8 @@ Move these into decisions as they resolve, with the reasoning.
 
 - [ ] Does `terraform plan` work reliably enough with dummy credentials for greenfield AWS configs, or is LocalStack required in the default dev path?
 - [ ] Is Checkov better as a subprocess or a direct import? Subprocess is the current call for version independence — revisit if parsing proves fragile.
-- [ ] What is the realistic verified-patch rate for a 7B local model? This determines whether the "runs free" claim survives contact with reality, and it should be measured in Phase 2, not assumed.
+- [ ] What is the realistic verified-patch rate, and how many attempts does it take? This determines whether the tool earns its inference cost, and it needs the Rego pack plus the benchmark harness before it can be measured. Do not guess it in the README.
+- [ ] Which small hosted models clear the bar? The prompts are written to work on modest models, but that is an intention until it is measured across a few.
 - [ ] How reliably can `generated_by` be detected without a flag? Commit trailers and PR labels are both weak signals.
 - [ ] Does the dedup key `(resource_address, rule_class)` hold up when Checkov and OPA disagree on severity for the same violation?
 
@@ -245,6 +264,20 @@ Architectural decisions and their reasoning. Append-only — supersede rather th
 **Decision:** Phase 0 ships a standalone IaC-Eval baseline before any agent code exists.
 **Reasoning:** cheapest artifact in the plan, useful independently of the tool, and it provides the number every later claim is measured against. It also surfaces early if the published failure rates do not reproduce.
 **Supersedes:** nothing.
+
+### 2026-08-31 — Hosted inference by default, no local model assumed
+
+**Decision:** `openai_compat` is the only network provider and the default. No default endpoint or model ships. No code path, test, or documented workflow may require a GPU or a locally hosted model.
+**Reasoning:** the zero-cost requirement in NFR1 exists so that contributors can run the tool. Making a local 7B model the default satisfied the cost half and broke the hardware half, excluding anyone without a discrete GPU — most people. Free-tier hosted endpoints satisfy both. Local inference is unaffected: Ollama speaks the same wire format and remains supported as an option.
+**Cost:** the tool now sends Terraform source to a third party by default. Mitigated by a single audited egress point (`core/context.py`), mandatory redaction, a refusal to send state files, and `--no-llm` / `scan` remaining fully functional. Documented in `SECURITY.md` rather than left implicit.
+**Supersedes:** the local-model default in `tech-stack.md` and the wording of NFR1.
+
+### 2026-08-31 — Whole-file patches instead of unified diffs
+
+**Decision:** `patch.txt` asks for the complete corrected file; `difflib` computes the diff we display.
+**Reasoning:** model-authored diffs fail on hunk headers and context drift often enough that the applier becomes the failure mode, and each malformed diff costs a retry without testing comprehension of the rule. Whole-file output cannot be malformed in that way.
+**Cost:** larger prompts, and a file-size ceiling above which a finding cannot be patched. Both are cheaper than an unreliable applier.
+**Supersedes:** the `Patch` shape and `patch.txt` contract in `specifications.md`, both updated in place with the reasoning recorded there.
 
 ---
 

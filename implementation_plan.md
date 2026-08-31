@@ -14,7 +14,7 @@ The ordering has one non-obvious property: **Phase 0 ships before any of the age
 - [ ] Write a minimal runner: prompt a model per scenario, capture Terraform output
 - [ ] Score with `terraform validate` and `terraform plan` for deployability
 - [ ] Add a compliance pass: Checkov and OPA over the generated configs
-- [ ] Run three models — one local 7B, one free-tier hosted, one frontier if affordable
+- [ ] Run three models — two free-tier hosted, one frontier if affordable. No local model: the harness must reproduce on a laptop without a GPU
 - [ ] Publish `benchmarks/BASELINE.md` with method, versions, token counts, and results
 
 **Done when:** you can state your own measured compliance pass rate, with a reproducible method, without citing anyone else's paper.
@@ -53,22 +53,25 @@ The ordering has one non-obvious property: **Phase 0 ships before any of the age
 
 **Goal:** the thing that makes this an agent rather than a linter.
 
-- [ ] `LLMProvider` protocol; `null` provider first, so tests exist before real providers
-- [ ] `llm/ollama.py`, `llm/openai_compat.py`, `llm/anthropic.py`
-- [ ] `core/context.py` — HCL block extraction, rule text, docs cache, exception precedent
-- [ ] `llm/prompts/explain.txt` — validate against a 7B model before a frontier one
-- [ ] `llm/prompts/patch.txt` — unified diff output, strict constraints
-- [ ] Diff parsing and applicability validation before verification
-- [ ] `core/verifier.py` — scratch copy, apply, re-gate, classify outcome
-- [ ] `core/loop.py` — the retry loop, bounded, failure reason fed back into context
-- [ ] `Decision` construction — assert `FIXED` is unreachable without `verified`
-- [ ] Fake providers returning canned patches: verified, regressed, ineffective, invalid
-- [ ] Tests for every path: success, regression, ineffective, malformed, retry exhaustion
-- [ ] Graceful degradation when the provider is unreachable
-- [ ] `--max-llm-findings` cap, severity-prioritised
-- [ ] `plimsoll verify` and `plimsoll explain`
+- [x] `LLMProvider` protocol; `null` provider first, so tests exist before real providers
+- [x] `llm/openai_compat.py` — one adapter reaches every endpoint that matters, so the planned `ollama` and `anthropic` modules were not needed
+- [x] `core/context.py` — HCL block extraction *(rule text, docs cache, and exception precedent wait on the rule pack and the exception store)*
+- [x] `llm/prompts/explain.txt`
+- [x] `llm/prompts/patch.txt` — whole-file output, strict constraints *(revised from unified diff)*
+- [x] Output validation before verification — empty and unchanged rejected, wrapping fence stripped
+- [x] `core/verifier.py` — scratch copy, apply, re-gate, classify outcome
+- [x] `core/loop.py` — the retry loop, bounded, failure reason fed back into context
+- [x] `Decision` construction — assert `FIXED` is unreachable without `verified`
+- [x] `core/redaction.py` — **not in the original plan.** Hosted inference makes every prompt an egress point, so this moved forward from Phase 3
+- [x] Fake providers returning canned patches: verified, regressed, ineffective, invalid
+- [x] Tests for every path: success, regression, ineffective, malformed, retry exhaustion
+- [x] Graceful degradation when the provider is unreachable
+- [x] `--max-llm-findings` cap, severity-prioritised
+- [x] `plimsoll verify` and `plimsoll explain`
 
-**Done when:** given a fixture with a wildcard IAM policy and a local 7B model, `plimsoll verify` produces a verified patch — and given a fixture the model cannot fix, produces a clean escalation with no unverified suggestion.
+**Done when:** given a fixture with a wildcard IAM policy and a hosted model, `plimsoll verify` produces a verified patch — and given a fixture the model cannot fix, produces a clean escalation with no unverified suggestion.
+
+**Status: built, not yet demonstrated.** Every path is tested against scripted providers, and no provider has been run against a live endpoint. The wildcard-IAM half of the exit criterion also needs the Rego pack, since nothing currently detects one.
 
 **Watch for:** the temptation to present a plausible-looking unverified patch because the verified rate feels low. Do not. A low honest number is the product; a high dishonest one destroys the reason anyone would use this.
 
@@ -82,7 +85,8 @@ The ordering has one non-obvious property: **Phase 0 ships before any of the age
 - [ ] Expiry handling with a distinct `EXPIRED_EXCEPTION` report state
 - [ ] `plimsoll exceptions` subcommands: list, add, expire, prune
 - [ ] Exception precedent flows into `ContextBuilder`
-- [ ] `core/redaction.py` — secret patterns, applied before prompts and before serialisation
+- [x] `core/redaction.py` — secret patterns, applied before prompts *(pulled into Phase 2: hosted inference made it a prerequisite rather than a Phase 3 nicety)*
+- [ ] Apply redaction before serialisation too — `Finding.raw` is not yet covered on the reporting path
 - [ ] `core/provenance.py` — record assembly, canonical JSON, SHA-256 content hash
 - [ ] `ToolVersion` capture for every check that ran; `SkippedCheck` for those that did not
 - [ ] `generated_by` detection from commit trailer, PR label, or flag
@@ -122,7 +126,7 @@ The ordering has one non-obvious property: **Phase 0 ships before any of the age
 - [ ] Capture patch attempts per finding, escalation rate, wall-clock, token counts
 - [ ] False-positive measurement against a corpus of known-good Terraform
 - [ ] `benchmarks/RESULTS.md` — full method, versions, dataset commit, reproduction instructions
-- [ ] Verify the harness completes with local models only, no paid inference
+- [ ] Verify the harness completes on free-tier hosted endpoints — no paid inference, no GPU
 - [ ] Rewrite the README's opening around the measured delta
 - [ ] Announcement: writeup, Show HN, r/devops, CNCF Slack, relevant newsletters
 

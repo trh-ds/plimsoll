@@ -4,11 +4,16 @@ Thanks for looking. This project is designed to be contributed to in two specifi
 shapes, and both are self-contained enough to finish in an evening.
 
 > **Current state: pre-alpha.** Phase 1 of `implementation_plan.md` is most of the way
-> done — the models, the gate, two adapters (`terraform_validate` and `checkov`),
-> deduplication, and a working `plimsoll scan` / `plimsoll doctor` all exist. The rule
-> pack is not written and neither is anything involving a model. If you want to add an
-> adapter now, the interface it plugs into is real and tested; if you want to add a rule,
-> the Rego harness does not exist yet, so open an issue first and we will sequence it.
+> done and Phase 2 is built: the models, the gate, two adapters (`terraform_validate` and
+> `checkov`), deduplication, the reasoning loop with patch re-verification, secret
+> redaction, and `plimsoll scan` / `verify` / `explain` / `doctor` all exist. The bundled
+> rule pack, the exception store, and provenance records do not. If you want to add an
+> adapter, the interface it plugs into is real and tested; if you want to add a rule, the
+> Rego harness does not exist yet, so open an issue first and we will sequence it.
+
+> **You do not need a GPU, a local model, or an AWS account.** Inference is hosted — any
+> OpenAI-compatible endpoint, including free tiers — and the whole test suite runs with
+> no model, no cloud tools, and no network at all.
 
 > **New to cloud infrastructure?** [`ONBOARDING.md`](ONBOARDING.md) explains what
 > Terraform is, what this project does and why, and lists tasks by how much domain
@@ -20,6 +25,8 @@ shapes, and both are self-contained enough to finish in an evening.
 |---|---|---|
 | **A new check adapter** — Trivy, KICS, or anything with structured output | One module, one test, one fixture | `src/plimsoll/checks/` |
 | **A policy rule** for the bundled Rego pack | One rule, two fixtures, one mapping | `policies/` *(not yet created)* |
+| **A model provider** for an endpoint that is not OpenAI-compatible | One module, one test | `src/plimsoll/llm/` |
+| **A secret pattern** redaction currently misses | One regex, one test | `core/redaction.py` |
 | A bug report with a reproducing Terraform fixture | Small | Issues |
 | Documentation that was wrong or unclear | Small | Anywhere |
 
@@ -44,7 +51,8 @@ That is a design conversation, not a rejected PR.
 ## Setup
 
 You need [uv](https://docs.astral.sh/uv/) and Python 3.11+. That is all — terraform,
-checkov, and opa are optional, and the test suite is built to pass without them.
+checkov, and opa are optional, a model is optional, and the test suite is built to pass
+without any of them.
 
 ```bash
 git clone https://github.com/trh-ds/plimsoll
@@ -172,6 +180,27 @@ Mirror `tests/test_terraform_validate.py`. At minimum:
 - Unparseable output raises `CheckExecutionError`.
 - One `@pytest.mark.slow` test that runs the real binary and skips when it is absent.
 
+## Walkthrough: add a model provider
+
+Only needed for an endpoint that does **not** speak the OpenAI chat-completions API —
+`openai_compat` already covers agent routers, GitHub Models, Groq, vLLM, LM Studio, a
+local Ollama, and OpenAI itself. Check before you write one.
+
+Use [`src/plimsoll/llm/openai_compat.py`](src/plimsoll/llm/openai_compat.py) as the
+reference. The rules that matter:
+
+- **Nothing outside `src/plimsoll/llm/` may name a model or a provider.** That is what
+  makes model-agnosticism a property of the code rather than a claim in a README.
+- `is_available()` inspects configuration and **never makes a network call**. `doctor`
+  must not spend tokens to answer a question about setup.
+- Never put the API key in `describe()`, in a log line, or in an exception message.
+  `doctor` output gets pasted into bug reports.
+- An unreadable response **raises**. Returning empty text would push a nonsense patch
+  into the verifier and burn a full gate run proving it is nonsense.
+- Separate the response parsing from the request, so the parsing is tested against
+  recorded payloads. **Unit tests open no sockets, loopback included** — monkeypatch the
+  transport.
+
 ## Walkthrough: add a policy rule
 
 Not yet possible — `policies/` and the Rego evaluation path land with the `opa` adapter.
@@ -186,8 +215,13 @@ If you want to write one now, open an issue and we will get the harness in ahead
 
 ## Testing conventions
 
-- **No network calls in unit tests. Ever.** Adapter tests read committed JSON. LLM tests
-  use the `null` provider or recorded fixtures.
+- **No network calls in unit tests. Ever**, and that includes loopback — a fake server on
+  `127.0.0.1` is still a socket. Adapter tests read committed JSON; provider tests
+  monkeypatch the transport or use the `null` provider.
+- **No test may require a GPU or a locally hosted model.** Nor may any documented
+  workflow.
+- **Nothing sends workspace content to a provider except `core/context.py`.** One egress
+  point is the only reason redaction can be audited.
 - **No `terraform apply`.** Not in code, not in tests, not in fixtures. This is a
   pre-deployment tool; if a test seems to need `apply`, the test is wrong.
 - **No cloud SDKs.** Plimsoll reads HCL and shells out to CLIs. It never authenticates

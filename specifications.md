@@ -30,8 +30,12 @@ class Finding(BaseModel):
     line_end: int
     message: str  # tool's own message, verbatim
     benchmark_refs: list[str]  # ["CIS-AWS-2.1.1"]
+    also_reported_by: list[CheckSource]  # other tools deduplicated into this finding
     raw: dict  # unmodified tool output for this finding
 ```
+
+`also_reported_by` exists so provenance can say "Checkov and OPA both flagged this".
+Dropping the duplicate silently would lose that.
 
 `rule_class` is what deduplication and exception matching key on. `rule_id` is what gets displayed. The mapping table lives in `checks/rule_classes.yaml` and is the single place tool-specific IDs meet internal semantics.
 
@@ -39,12 +43,20 @@ class Finding(BaseModel):
 
 ```python
 class Patch(BaseModel):
-    diff: str  # unified diff
-    files_touched: list[Path]
-    rationale: str  # one paragraph, model-authored
     target_finding_id: str
     attempt: int
+    files_touched: list[Path]
+    new_content: str  # the complete corrected file, as returned by the model
+    diff: str  # unified diff, computed from new_content by difflib
+    rationale: str  # one paragraph, model-authored
 ```
+
+**Revised after implementation.** This originally carried only `diff`, with the model
+asked to emit a unified diff directly. Models produce diffs with wrong hunk headers and
+drifting context lines often enough that the diff applier becomes the component that
+fails, and every malformed diff burns a retry without ever testing whether the model
+understood the rule. Whole-file output moves the formatting burden onto code that cannot
+get it wrong. The diff is still what a human reads and what provenance records.
 
 ### PatchVerification
 
@@ -64,21 +76,27 @@ Constructed only by `VerifierLoop`. Never by a reasoner, never by a check.
 ```python
 class Decision(BaseModel):
     finding: Finding
-    status: DecisionStatus  # PASS | FIXED | ESCALATED | EXEMPTED | BLOCKED
+    status: DecisionStatus  # PASS | FIXED | ESCALATED | EXEMPTED | BLOCKED | REPORTED
     explanation: str | None
     patch: Patch | None  # present only when status == FIXED
     verification: PatchVerification | None
     attempts: int
-    exception_ref: ExceptionRef | None
+    exception_ref: ExceptionRef | None  # arrives with the exception store
 ```
 
 | Status | Meaning |
 |---|---|
 | `PASS` | No violation. |
 | `FIXED` | Violation found, patch produced, patch passed re-verification. |
-| `ESCALATED` | Violation found, no verified patch after `max_retries`. Human required. |
+| `ESCALATED` | Violation found, attempted, no verified patch after `max_retries`. Human required. |
 | `EXEMPTED` | Matched a recorded exception. Reported, not counted as failure. |
-| `BLOCKED` | Violation at or above the configured threshold; the run fails. |
+| `BLOCKED` | Violation at or above the threshold that was never attempted — `--no-llm`, no provider, or past `--max-llm-findings`. The run fails. |
+| `REPORTED` | Violation below the threshold. Never sent to a model. The run does not fail on it. |
+
+`REPORTED` was added during implementation. The original five had no honest home for "a
+real violation, below `--fail-on`, never attempted": `PASS` means no violation, which
+would be a lie, and `BLOCKED` means the run fails, which it does not. A tool whose thesis
+is that silence must not read as success cannot mislabel its own output.
 
 `FIXED` is only reachable through `PatchVerification.outcome == "verified"`. This is asserted in code, not merely intended.
 
@@ -128,35 +146,47 @@ Matching is exact on `rule_class`, glob on `resource_address`. An expired entry 
 ## CLI contract
 
 ```
-plimsoll scan <path>       Deterministic only. No model. Fast.
-plimsoll verify <path>     Full loop: scan, explain, fix, re-verify, attest.
-plimsoll explain <path>    Scan plus explanations, no patches.
-plimsoll exceptions        Subcommands: list, add, expire, prune.
-plimsoll doctor            Report which external tools and providers are available.
+plimsoll scan <path>       Deterministic only. No model. Fast.                    [built]
+plimsoll verify <path>     Full loop: scan, explain, fix, re-verify, attest.      [built]
+plimsoll explain <path>    Scan plus explanations, no patches.                    [built]
+plimsoll exceptions        Subcommands: list, add, expire, prune.             [not built]
+plimsoll doctor            Report which external tools and providers are available. [built]
 ```
+
+`verify` does not yet attest — provenance is Phase 3. It scans, explains, fixes, and
+re-verifies.
 
 ### Shared flags
 
-| Flag | Default | Meaning |
-|---|---|---|
-| `--policy-dir` | `./policies` | Additional Rego to load alongside the bundled pack |
-| `--fail-on` | `high` | Minimum severity that sets a non-zero exit |
-| `--format` | `terminal` | `terminal` \| `json` \| `sarif` \| `github` |
-| `--provenance` | none | Path to write the JSON record |
-| `--no-llm` | false | Force deterministic mode |
-| `--max-retries` | 2 | Patch attempts per finding before escalation |
-| `--max-llm-findings` | 25 | Cap on findings sent to the model, highest severity first |
-| `--generated-by` | `unknown` | Recorded in provenance |
-| `--timeout` | 600 | Whole-run budget in seconds |
+| Flag | Default | Meaning | Status |
+|---|---|---|---|
+| `--policy-dir` | `./policies` | Additional Rego to load alongside the bundled pack | built |
+| `--fail-on` | `high` | Minimum severity that sets a non-zero exit | built |
+| `--format` | `terminal` | `terminal` \| `json` \| `sarif` \| `github` | `terminal` and `json` only |
+| `--provenance` | none | Path to write the JSON record | not built |
+| `--no-llm` | false | Force deterministic mode | built |
+| `--max-retries` | 2 | Patch attempts per finding before escalation | built |
+| `--max-llm-findings` | 25 | Cap on findings sent to the model, highest severity first | built |
+| `--generated-by` | `unknown` | Recorded in provenance | not built |
+| `--timeout` | 600 | Whole-run budget in seconds | **per-check, not whole-run**; default 120 |
+
+`--timeout` is the one flag whose current behaviour differs from this contract rather
+than being absent. Exit code 4 is unimplemented for the same reason.
 
 ### Environment
 
 ```
-PLIMSOLL_LLM_PROVIDER    ollama | openai_compat | anthropic | null
+PLIMSOLL_LLM_PROVIDER    openai_compat (default) | null
 PLIMSOLL_LLM_MODEL       provider-specific model identifier
-PLIMSOLL_LLM_BASE_URL    for openai_compat and ollama
-PLIMSOLL_LLM_API_KEY     for hosted providers
+PLIMSOLL_LLM_BASE_URL    the endpoint; required by openai_compat
+PLIMSOLL_LLM_API_KEY     optional -- some gateways authenticate by network position
 ```
+
+`openai_compat` reaches any endpoint speaking the OpenAI chat-completions API: agent
+routers, GitHub Models, Groq, vLLM, LM Studio, a local Ollama, or OpenAI itself. One
+adapter covers all of them, which is why vendor-specific providers are not built. An
+endpoint speaking a different wire format needs a new provider module in
+`src/plimsoll/llm/`, and nothing else.
 
 ### Exit codes
 
@@ -223,21 +253,38 @@ Each entry needs: Rego implementation, a violating fixture, a compliant fixture,
 
 ## LLM prompt contracts
 
-Two prompts, in `llm/prompts/`. Both must produce usable output from a 7B local model — if a prompt only works on a frontier model, it is the wrong prompt.
+Two prompts, in `llm/prompts/`, as `.txt` files. They are content, not code.
+
+Both must produce usable output from a small model. A prompt that only works on a
+frontier model is the wrong prompt: it makes the tool's cost a function of the model
+rather than the workload, and it cannot be validated by a contributor on a free tier.
+
+Every prompt is assembled by `core/context.py` and passes through `core/redaction.py` on
+the way out. That is the only place workspace content becomes network payload.
 
 ### `explain.txt`
 
-**Input:** rule text, benchmark clause, offending HCL block, resource address, prior accepted exceptions for this rule class.
+**Input:** rule class and id, source tool, severity, resource address, location, the checker's message, and the offending HCL block.
 **Output:** prose, under 120 words, stating the rule, why this resource violates it, and the concrete risk. No markdown headers, no preamble.
 **Must not:** claim the finding is a false positive, suggest suppressing the rule, or state a compliance verdict.
 
+*Not yet supplied:* benchmark clause text and prior accepted exceptions. Both need the
+rule pack and the exception store.
+
 ### `patch.txt`
 
-**Input:** everything above, plus the full file content and, on retry, the previous attempt's `failure_reason`.
-**Output:** a unified diff and nothing else. No fences, no commentary.
-**Constraints stated in the prompt:** touch only the file and resource named; change no unrelated attributes; introduce a new resource only when the rule requires one; preserve existing comments and formatting.
+**Input:** everything above, plus the full current file content and, on retry, the previous attempt's `failure_reason`.
+**Output:** the complete corrected file and nothing else. No fences, no commentary.
+**Constraints stated in the prompt:** touch only the file and resource named; change no unrelated attributes; introduce a new resource only when the rule requires one; preserve existing comments and formatting; never weaken another resource to make this rule pass; copy `[REDACTED:n]` tokens through unchanged.
 
-Validation before verification: the diff must parse and apply cleanly. Malformed output is rejected without consuming a verification run, and counts as a retry.
+**Revised after implementation** — the output was originally specified as a unified diff.
+See the `Patch` note above for why.
+
+Validation before verification: output that is empty, or identical to what is on disk, is
+rejected. A markdown fence wrapping the entire answer is stripped rather than rejected —
+the prompt forbids fences and models add them anyway, and failing over one would report
+"the model cannot fix this" when it could. Rejected output costs a retry without
+consuming a verification run.
 
 ## Provenance record example
 
@@ -258,7 +305,7 @@ Validation before verification: the diff must parse and apply cleanly. Malformed
     {"name": "checkov", "version": "3.2.x"},
     {"name": "opa", "version": "0.68.0"}
   ],
-  "model": {"provider": "ollama", "model": "qwen2.5-coder:7b"},
+  "model": {"provider": "openai_compat", "model": "your-model-id"},
   "decisions": [
     {
       "finding": {
@@ -299,4 +346,4 @@ Validation before verification: the diff must parse and apply cleanly. Malformed
 - Mean patch attempts per finding
 - Escalation rate
 
-Method, model versions, dataset commit, and total token counts are published alongside. The harness must complete against local models with no paid inference — that is the claim, and the harness is where it is either true or not.
+Method, model versions, dataset commit, and total token counts are published alongside. The harness must complete on an ordinary laptop with no GPU and no paid inference — a free-tier hosted endpoint is enough. That is the claim, and the harness is where it is either true or not.

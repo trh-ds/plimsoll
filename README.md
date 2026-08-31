@@ -12,11 +12,11 @@ Plimsoll runs in CI between your AI coding agent and your cloud account. It find
 >
 > This README describes the design. Some of it is built and some of it is not, and the
 > difference is tracked honestly in **[Where this actually is](#where-this-actually-is)**
-> below and in [`CHANGELOG.md`](CHANGELOG.md). There is no release, no PyPI package, and
-> no working CLI yet.
+> below and in [`CHANGELOG.md`](CHANGELOG.md). There is no release and no PyPI package.
 >
-> The [interface for adding a check adapter](CONTRIBUTING.md#walkthrough-add-a-check-adapter)
-> *is* built and tested, so that contribution is available today.
+> `plimsoll scan`, `plimsoll verify`, `plimsoll explain`, and `plimsoll doctor` all run
+> from a checkout today. What is missing is the bundled rule pack, the exception store,
+> and provenance records.
 
 ---
 
@@ -66,16 +66,21 @@ If the model hallucinates a resource type, scopes an ARN wrong, or fixes one fin
 |---|---|
 | The gate — adapter protocol, registry, availability probing, crash isolation | **Built** |
 | `terraform_validate` and `checkov` adapters | **Built** |
-| Core models — `Finding`, `Severity`, `GateResult`, config | **Built** |
+| Core models — `Finding`, `Patch`, `Decision`, `GateResult`, config | **Built** |
 | Cross-tool deduplication | **Built** |
-| `plimsoll scan` and `plimsoll doctor`, terminal and JSON output | **Built** |
+| The reasoning loop and patch re-verification | **Built** |
+| Model providers — `openai_compat`, `null` | **Built** |
+| Secret redaction on the prompt path | **Built** |
+| `plimsoll scan`, `verify`, `explain`, `doctor`; terminal and JSON output | **Built** |
 | `opa` and `terraform_plan` adapters | Next |
 | Bundled rule pack (20 Rego rules) | Not started |
-| CLI — `verify`, `explain`, `exceptions` | Not started |
-| The reasoning loop and patch re-verification | Not started |
-| Exception store and provenance records | Not started |
-| GitHub Action and PR comments | Not started |
+| Exception store, `plimsoll exceptions` | Not started |
+| Provenance records | Not started |
+| SARIF output, GitHub Action, PR comments | Not started |
 | Published benchmark numbers | Not started |
+
+The loop works. What it does not yet have is much to reason *about*: the bundled Rego
+pack is unwritten, so findings come from `checkov` and `terraform validate` only.
 
 Phase by phase, that is [`implementation_plan.md`](implementation_plan.md); what changed
 when is [`CHANGELOG.md`](CHANGELOG.md); the running log with the surprises in it is
@@ -83,21 +88,21 @@ when is [`CHANGELOG.md`](CHANGELOG.md); the running log with the surprises in it
 
 ## Quick start
 
-**None of this works yet** — it is the v0.1 interface, specified in
-[`specifications.md`](specifications.md) and written down here so it can be argued with
-before it is built.
+There is no PyPI release yet, so `uv tool install` does not work — run it from a
+checkout, as [below](#what-you-can-run-today). The interface itself is real:
 
 ```bash
-uv tool install plimsoll
-
 # scan only, no model required
 plimsoll scan ./infra
 
-# full loop
-export PLIMSOLL_LLM_PROVIDER=ollama
-export PLIMSOLL_LLM_MODEL=qwen2.5-coder:7b
-plimsoll verify ./infra --provenance out/attestation.json
+# full loop, against any OpenAI-compatible endpoint
+export PLIMSOLL_LLM_BASE_URL=https://your-router.example/v1
+export PLIMSOLL_LLM_MODEL=your-model-id
+export PLIMSOLL_LLM_API_KEY=...
+plimsoll verify ./infra
 ```
+
+`--provenance` is not implemented yet.
 
 As a GitHub Action:
 
@@ -114,41 +119,58 @@ Plimsoll is meant to run against Copilot, Claude, Cursor, or human-written Terra
 
 ### What you can run today
 
-The deterministic scan works, against real Checkov, with real exit codes.
-
 ```bash
 git clone https://github.com/trh-ds/plimsoll
 cd plimsoll
 uv sync
 
-uv run plimsoll doctor                            # which tools are installed
+uv run plimsoll doctor                            # which tools and which model
 uv run plimsoll scan tests/fixtures/insecure_s3   # exit 1: findings at or above HIGH
 uv run plimsoll scan tests/fixtures/compliant_s3  # exit 0
 uv run pytest                                     # needs no terraform, checkov, or opa
 ```
 
-`scan` supports `--fail-on`, `--format terminal|json`, `--policy-dir`, and `--timeout`.
-With no checker installed it exits **3** and says nothing was verified, rather than
-reporting a clean pass.
+The scan is deterministic and needs no model. `verify` adds the loop:
+
+```bash
+export PLIMSOLL_LLM_BASE_URL=https://your-router.example/v1
+export PLIMSOLL_LLM_MODEL=your-model-id
+export PLIMSOLL_LLM_API_KEY=...
+
+uv run plimsoll verify tests/fixtures/insecure_s3
+uv run plimsoll explain tests/fixtures/insecure_s3   # prose only, no patches
+```
+
+`verify` never writes to your workspace. Patches are applied to a temporary copy and
+re-run through the same checks; only fixes that pass are printed.
+
+Shared flags: `--fail-on`, `--format terminal|json`, `--policy-dir`, `--timeout`. `verify`
+adds `--no-llm`, `--max-retries`, and `--max-llm-findings`.
+
+Exit codes: **0** clean, **1** findings at or above `--fail-on` remain, **2** config
+error, **3** no check could run. With no checker installed it exits 3 and says nothing
+was verified, rather than reporting a clean pass.
 
 ## Design commitments
 
 These are the properties the project exists to have. They are enforced as
 [invariants](CLAUDE.md#the-invariants) in the code, not as intentions.
 
-- **Model-agnostic.** Ollama, any OpenAI-compatible endpoint, GitHub Models, Anthropic. Swap providers with one env var.
-- **Runs free.** Local models via Ollama work end to end. No paid API key is required to develop, test, or use this.
-- **Degrades safely.** With `--no-llm`, or when the provider is unreachable, Plimsoll is a working policy scanner. It never fails open.
+- **Model-agnostic.** Any OpenAI-compatible endpoint: an agent router, GitHub Models, Groq, vLLM, LM Studio, or a local Ollama if you want one. Three environment variables, no code change.
+- **No GPU required.** Inference is hosted by default. Requiring a local model would make the project unusable on the average laptop, and a contributor who cannot run the tool cannot contribute to it. Free-tier hosted endpoints keep the zero-cost path open without the hardware.
+- **Nothing leaves without redaction.** Prompts carry your Terraform to a third party, so every prompt passes through one audited choke point that strips credential-shaped values first. Redaction is reversible, so a patch never overwrites a real secret with a placeholder.
+- **Degrades safely.** With `--no-llm`, or when the provider is unreachable or unconfigured, Plimsoll is a working policy scanner. It never fails open.
 - **Never applies.** `terraform apply` is not called anywhere in this codebase. This is a pre-deployment tool.
-- **Remembers exceptions.** A finding accepted in a previous PR is not re-raised. Alert fatigue is the main reason policy-as-code gets switched off.
+- **Never edits your repo.** `verify` copies the workspace, patches the copy, and reports. Your files are not touched.
+- **Remembers exceptions.** A finding accepted in a previous PR is not re-raised. Alert fatigue is the main reason policy-as-code gets switched off. *(Not built yet.)*
 
 ## Benchmarks
 
 *Planned, not yet published.* `benchmarks/` will reproduce IaC-Eval against current
 models and measure the delta Plimsoll's loop produces, with method, model versions,
-dataset commit, and token counts alongside. Reproducing it is meant to require no paid
-inference — the harness runs against local models, and that claim is the whole point of
-publishing the harness rather than only the numbers.
+dataset commit, and token counts alongside. Reproducing it is meant to be possible on a
+free-tier hosted endpoint and an ordinary laptop — no GPU, no paid inference — and that
+claim is the whole point of publishing the harness rather than only the numbers.
 
 Until those numbers exist, treat every effectiveness claim in this README as a design
 intention rather than a measurement.

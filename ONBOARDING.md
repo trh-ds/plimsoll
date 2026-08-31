@@ -157,12 +157,15 @@ Built and working today:
 
 | Piece | What it is |
 |---|---|
-| Core data model | `Finding`, `Severity`, `GateResult` — the shapes everything passes around |
+| Core data model | `Finding`, `Patch`, `Decision`, `GateResult` — the shapes everything passes around |
 | The gate | Runs check adapters, isolates crashes, aggregates results |
 | `terraform_validate` adapter | Wraps `terraform validate` |
 | `checkov` adapter | Wraps Checkov |
 | Deduplication | Two tools reporting one problem collapse into one finding |
-| `plimsoll scan` / `plimsoll doctor` | Working CLI with correct exit codes |
+| **The AI loop** | Steps 2–5 above. Explain, patch, re-verify, escalate |
+| **Model providers** | Any OpenAI-compatible endpoint, plus a `null` one for tests |
+| **Secret redaction** | Strips credentials from prompts, reversibly |
+| `plimsoll scan` / `verify` / `explain` / `doctor` | Working CLI with correct exit codes |
 | Terminal + JSON reporters | Human-readable and machine-readable output |
 | Test fixture corpus | A deliberately broken Terraform config and a clean one |
 
@@ -172,18 +175,32 @@ Not built at all:
 |---|---|
 | `opa` and `terraform_plan` adapters | Next up. Interface is ready for them |
 | The bundled rule pack | 20 Rego rules specified, zero written |
-| The AI loop | Steps 2–5 above. None of it exists |
 | Exception store | "We accepted this finding last week, don't ask again" |
 | Provenance records | The audit trail |
+| SARIF output | The standard format GitHub's security tab reads |
 | GitHub Action, PR comments | How anyone would actually use this |
 | Benchmarks | The numbers that would make anyone believe it works |
 
-Roughly: **942 lines of source, 111 unit tests, 3 tests that shell out to real tools.**
-The deterministic scanner works end to end. Everything that makes it an *agent* rather
-than a linter is unwritten.
+Roughly: **2,100 lines of source, 183 unit tests, 3 tests that shell out to real tools.**
+
+The loop works. What it doesn't have yet is much to reason *about* — the bundled rule
+pack is unwritten, so findings only come from Checkov and `terraform validate`. Writing
+those rules is the single biggest chunk of work left, and it's the part that most needs
+someone who's read what the rules are supposed to catch.
 
 Honest framing: this is early. That's good for you — the parts left are self-contained
 and there's no legacy to fight.
+
+### You don't need a GPU, and you don't need to pay for anything
+
+This matters enough to say plainly, because it's the assumption that stops people.
+
+The AI part runs against a **hosted** model over an ordinary HTTPS call — three
+environment variables, no local model, no graphics card. Free-tier endpoints work.
+
+And you don't need any of that to contribute. **The entire test suite runs with no model,
+no cloud tools, and no network.** Most of the task list below never touches a model at
+all.
 
 ---
 
@@ -194,19 +211,31 @@ src/plimsoll/
   core/
     models.py      Every data shape. Read this first — it's the vocabulary
     gate.py        Runs the checks, collects findings, deduplicates
+    context.py     Builds the prompts. The only place your code leaves your machine
+    verifier.py    Applies a patch to a scratch copy and re-runs the gate on it
+    loop.py        Sequences it: explain, patch, verify, retry, escalate
+    redaction.py   Strips credentials out of anything model-bound
   checks/          One file per external tool
     terraform_validate.py
     checkov.py
     severity_map.py  Explicit tables: this tool's "error" means our HIGH
     rule_map.py      Explicit tables: Checkov's CKV_AWS_20 means "public bucket, CRITICAL"
     addresses.py     Parses "module.reports.aws_s3_bucket.data" into its parts
+  llm/             Talking to models. Nothing outside this folder names a model
+    openai_compat.py  Any endpoint speaking the OpenAI API — which is nearly all of them
+    null.py           A provider that refuses. For tests and --no-llm
+    prompts/          explain.txt and patch.txt. Content, not code
   reporters/       Output formats
   cli.py           The command line
 
 tests/
   fixtures/        Real captured tool output + deliberately broken Terraform
+  conftest.py      Fake tools and fake models, shared by the loop tests
   test_*.py        One file per module
 ```
+
+If you read three files, read `core/models.py` (the vocabulary), `core/loop.py` (the
+whole product in 200 lines), and `core/verifier.py` (the bit that makes it trustworthy).
 
 ### The one interesting design decision
 
@@ -252,13 +281,13 @@ You need [uv](https://docs.astral.sh/uv/) (Python package manager) and Python 3.
 git clone https://github.com/trh-ds/plimsoll
 cd plimsoll
 uv sync
-uv run pytest        # 111 tests, needs no cloud tools installed
+uv run pytest        # 183 tests, needs no cloud tools, no model, no network
 ```
 
 The test suite deliberately requires **nothing** external — no Terraform, no Checkov, no
-network. It runs against JSON output captured from real tool runs and committed to the
-repo. So you can work on most of this project without installing anything cloud-related
-at all.
+model, no network. It runs against JSON output captured from real tool runs and committed
+to the repo. So you can work on most of this project without installing anything
+cloud-related at all.
 
 To see it do real work, install Checkov (`uv tool install checkov`) and then:
 
@@ -281,6 +310,41 @@ Checks run: checkov 3.3.15
 16 finding(s), 6 at or above HIGH.
 ```
 
+### And to see the AI part
+
+Point it at any OpenAI-compatible endpoint. Three variables, no local model:
+
+```bash
+export PLIMSOLL_LLM_BASE_URL=https://your-endpoint.example/v1
+export PLIMSOLL_LLM_MODEL=your-model-id
+export PLIMSOLL_LLM_API_KEY=...
+
+uv run plimsoll explain tests/fixtures/insecure_s3   # prose, no patches
+uv run plimsoll verify  tests/fixtures/insecure_s3   # the full loop
+```
+
+`verify` output has one shape worth understanding, because it *is* the product:
+
+```
+  FIXED      CRITICAL s3.acl.public
+             aws_s3_bucket.reports  main.tf:28
+             ...
+             verified fix (attempt 1):
+             -  acl    = "public-read"
+             +  acl    = "private"
+
+  ESCALATED  HIGH     iam.action.wildcard
+             aws_iam_role_policy.reports
+             could not fix after 3 attempt(s): iam.action.wildcard is still reported
+             no unverified patch is shown; this needs a human.
+```
+
+The second block is the interesting one. The model *did* produce patches for it, three
+times, and all three were thrown away because re-running the scanner showed they didn't
+work. You never see them. Most AI tools would have shown you the best-looking one.
+
+`verify` never edits your files — patches go to a temp copy.
+
 ---
 
 ## Part 6 — Pick something to work on
@@ -301,21 +365,34 @@ These are pure Python against data structures that are already defined and teste
    `reporters/terminal.py`.
 4. **Deduplication edge cases.** `_deduplicate` in `gate.py` is about 20 lines with clear
    rules. Reading it and trying to break it with a test is a genuinely useful hour.
+5. **More secret patterns.** `core/redaction.py` strips credentials out of anything sent
+   to a model. It currently knows AWS keys, GitHub/Slack/OpenAI tokens, Google API keys,
+   JWTs, and PEM blocks. Every pattern it doesn't know is a credential that gets
+   transmitted. One regex plus one test, and it is real security work — probably the
+   highest value-per-line task on this list.
+6. **Break the loop.** `tests/conftest.py` has a fake scanner and a fake model, so you can
+   script "the model returns *this*" and assert what the loop does. Try to find a
+   sequence where an unverified patch reaches the output. If you find one, that's a
+   serious bug and we'd want to know.
 
 ### Needs a little, and teaches you the rest
 
-5. **A new check adapter — Trivy or KICS.** Both are scanners like Checkov. You install
+7. **A new check adapter — Trivy or KICS.** Both are scanners like Checkov. You install
    the tool, run it against `tests/fixtures/insecure_s3`, look at its JSON, and write a
    file that maps that JSON onto `Finding`. `checks/checkov.py` is the worked example.
    The step-by-step is in [`CONTRIBUTING.md`](CONTRIBUTING.md#walkthrough-add-a-check-adapter).
-6. **Extend `rule_map.py`.** Checkov has ~1,000 rules; we've classified 10. Each addition
+8. **Extend `rule_map.py`.** Checkov has ~1,000 rules; we've classified 10. Each addition
    means running Checkov against a config, reading what fires, and deciding which of our
    rule classes it means. Mechanical, and you learn the domain as you go.
+9. **Improve the prompts.** They're plain text files in `llm/prompts/`, no code. If the
+   model keeps making a particular mistake, the fix is usually a sentence here. Needs an
+   endpoint to test against, but no cloud knowledge.
 
 ### Needs real cloud knowledge
 
-7. **The Rego rule pack.** 20 rules specified in `specifications.md`, none written.
-8. **The `terraform_plan` adapter.** Runs a plan and hands the JSON to OPA.
+10. **The Rego rule pack.** 20 rules specified in `specifications.md`, none written. This
+    is the biggest remaining piece of work in the project.
+11. **The `terraform_plan` adapter.** Runs a plan and hands the JSON to OPA.
 
 ### Before you start
 
@@ -359,6 +436,12 @@ shipping bugs:
 | **Adapter** | One file wrapping one external tool |
 | **Finding** | One normalised violation. See `core/models.py` |
 | **`--no-llm`** | Run with no AI at all. Must always work |
+| **Patch** | A candidate fix the model wrote. A proposal, never a verdict |
+| **Decision** | What happened to one finding: FIXED, ESCALATED, BLOCKED, REPORTED |
+| **Re-verification** | Re-running the scanner on the patched copy. The whole point |
+| **Escalated** | We tried to fix it, failed, and are handing it to a human unaltered |
+| **Provider** | Something that returns text from a model. See `llm/` |
+| **Redaction** | Stripping credentials out before anything is sent to a model |
 | **CI** | Continuous Integration. Checks that run automatically on a pull request |
 | **SARIF** | A standard JSON format for static-analysis results |
 

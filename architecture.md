@@ -119,13 +119,17 @@ The only place a model is invoked.
 class LLMProvider(Protocol):
     name: str
 
-    def is_available(self) -> bool: ...
+    def is_available(self) -> ToolAvailability: ...
     def complete(self, system: str, user: str, max_tokens: int) -> str: ...
 ```
 
-Implementations: `ollama`, `openai_compat` (covers Groq, Cerebras, OpenRouter, vLLM, LM Studio, GitHub Models), `anthropic`, `null`. The `null` provider returns a fixed refusal and exists so tests and `--no-llm` traverse the same code path rather than a special case.
+Implementations: `openai_compat` (covers agent routers, Groq, Cerebras, OpenRouter, vLLM, LM Studio, GitHub Models, a local Ollama, and OpenAI itself) and `null`. The `null` provider refuses every call and exists so tests and `--no-llm` traverse the same code path rather than a special case. `is_available` reuses `ToolAvailability` from the check adapters: an unconfigured model is the same class of fact as an uninstalled binary.
 
-Two prompts, both in `llm/prompts/` as files: one asking for an explanation, one asking for a unified diff. Separating them keeps each output format simple to validate. Patch output is parsed as a diff and rejected before verification if it does not apply cleanly — a malformed diff should not consume a verification run.
+Inference is hosted by default and no endpoint ships as a default. Requiring a local model would make the project unusable on a laptop without a GPU, which is most laptops; see NFR1 in `product-requirements.md` for the trade.
+
+Two prompts, both in `llm/prompts/` as files: one asking for an explanation, one asking for the corrected file. Separating them keeps each output format simple to validate. Output that is empty or unchanged is rejected before verification — a useless answer should not consume a verification run.
+
+Every prompt is assembled by `core/context.py`, which is the **only** place workspace content becomes network payload, and every prompt is scrubbed by `core/redaction.py` on the way out. One egress point is the reason that scrubbing can be audited at all.
 
 The Reasoner has no access to `Decision`. It cannot set status, cannot mark anything resolved, cannot see the final report. This is enforced by the type signature, not by convention.
 
