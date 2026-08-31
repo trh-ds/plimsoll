@@ -6,7 +6,12 @@ distinguished from a report from a broken toolchain, and silence must never read
 success.
 """
 
-from plimsoll.reporters.json_report import render_json
-from plimsoll.reporters.terminal import render_terminal
+from plimsoll.reporters.json_report import render_json, render_verify_json
+from plimsoll.reporters.terminal import render_terminal, render_verify_terminal
 
-__all__ = ["render_json", "render_terminal"]
+__all__ = [
+    "render_json",
+    "render_terminal",
+    "render_verify_json",
+    "render_verify_terminal",
+]

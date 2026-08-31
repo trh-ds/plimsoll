@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from plimsoll.core.models import GateResult, Severity
+from plimsoll.core.models import DecisionStatus, GateResult, Severity, VerifyResult
 
 
 def build_payload(result: GateResult, *, fail_on: Severity) -> dict[str, Any]:
@@ -33,3 +33,25 @@ def build_payload(result: GateResult, *, fail_on: Severity) -> dict[str, Any]:
 
 def render_json(result: GateResult, *, fail_on: Severity) -> str:
     return json.dumps(build_payload(result, fail_on=fail_on), indent=2, sort_keys=True)
+
+
+def build_verify_payload(result: VerifyResult, *, fail_on: Severity) -> dict[str, Any]:
+    payload = build_payload(result.gate, fail_on=fail_on)
+    payload["summary"].update(
+        {
+            "fixed": len(result.fixed),
+            "escalated": len(result.with_status(DecisionStatus.ESCALATED)),
+            "unresolved_blocking": len(result.unresolved_at_or_above),
+        }
+    )
+    payload["model"] = {
+        "used": result.llm_used,
+        "description": result.llm_description,
+        "unavailable_reason": result.llm_unavailable_reason,
+    }
+    payload["decisions"] = [d.model_dump(mode="json") for d in result.decisions]
+    return payload
+
+
+def render_verify_json(result: VerifyResult, *, fail_on: Severity) -> str:
+    return json.dumps(build_verify_payload(result, fail_on=fail_on), indent=2, sort_keys=True)

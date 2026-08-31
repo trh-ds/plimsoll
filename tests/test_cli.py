@@ -169,7 +169,93 @@ def test_doctor_exits_three_when_nothing_can_run(monkeypatch):
     assert "No checks can run." in result.output
 
 
-@pytest.mark.parametrize("command", ["verify", "explain", "exceptions"])
+@pytest.mark.parametrize("command", ["exceptions"])
 def test_unbuilt_commands_are_absent_rather_than_stubbed(command):
+    """`exceptions` needs the Phase 3 store. A subcommand that does nothing is worse
+    than one that is honestly absent."""
     result = runner.invoke(cli.app, [command, "."])
     assert result.exit_code != 0
+
+
+def no_model(monkeypatch) -> None:
+    """No model configured, which is also the state of a fresh clone."""
+    for name in ("PROVIDER", "MODEL", "BASE_URL", "API_KEY"):
+        monkeypatch.delenv(f"PLIMSOLL_LLM_{name}", raising=False)
+
+
+def test_doctor_reports_an_unconfigured_model_as_missing(monkeypatch):
+    no_model(monkeypatch)
+    use_gate(monkeypatch, [StubCheck("checkov", available())])
+    result = runner.invoke(cli.app, ["doctor"])
+
+    assert result.exit_code == 0
+    assert "missing  model" in result.output
+    assert "PLIMSOLL_LLM_BASE_URL" in result.output
+    # A missing model does not make the scanner unusable, and doctor must say so.
+    assert "scan still works" in result.output
+
+
+def test_doctor_names_a_configured_model_without_leaking_the_key(monkeypatch):
+    monkeypatch.setenv("PLIMSOLL_LLM_PROVIDER", "openai_compat")
+    monkeypatch.setenv("PLIMSOLL_LLM_MODEL", "claude-opus-5")
+    monkeypatch.setenv("PLIMSOLL_LLM_BASE_URL", "https://router.example/api/v1")
+    monkeypatch.setenv("PLIMSOLL_LLM_API_KEY", "sk-secret-value")
+    use_gate(monkeypatch, [StubCheck("checkov", available())])
+    result = runner.invoke(cli.app, ["doctor"])
+
+    assert "ok       model" in result.output
+    assert "claude-opus-5" in result.output
+    assert "sk-secret-value" not in result.output
+    assert "does not spend tokens" in result.output
+
+
+def test_verify_without_a_model_degrades_to_deterministic_reporting(monkeypatch, tmp_path):
+    """Invariant 4. The exit code still comes from the gate."""
+    no_model(monkeypatch)
+    use_gate(monkeypatch, [StubCheck("checkov", available(), [finding(Severity.CRITICAL)])])
+    result = runner.invoke(cli.app, ["verify", str(tmp_path)])
+
+    assert result.exit_code == 1
+    assert "not used" in result.output
+    assert "nothing was fixed" in result.output
+    assert "BLOCKED" in result.output
+
+
+def test_verify_no_llm_never_contacts_a_provider(monkeypatch, tmp_path):
+    monkeypatch.setenv("PLIMSOLL_LLM_MODEL", "claude-opus-5")
+    monkeypatch.setenv("PLIMSOLL_LLM_BASE_URL", "https://router.example/api/v1")
+    use_gate(monkeypatch, [StubCheck("checkov", available(), [finding(Severity.CRITICAL)])])
+    result = runner.invoke(cli.app, ["verify", str(tmp_path), "--no-llm"])
+
+    assert result.exit_code == 1
+    assert "--no-llm" in result.output
+
+
+def test_verify_exits_three_when_nothing_could_run(monkeypatch, tmp_path):
+    no_model(monkeypatch)
+    use_gate(monkeypatch, [StubCheck("checkov", ToolAvailability.missing("checkov", "gone"))])
+    result = runner.invoke(cli.app, ["verify", str(tmp_path)])
+
+    assert result.exit_code == 3
+    assert "Nothing was verified" in result.output
+
+
+def test_verify_json_reports_decisions(monkeypatch, tmp_path):
+    no_model(monkeypatch)
+    use_gate(monkeypatch, [StubCheck("checkov", available(), [finding(Severity.CRITICAL)])])
+    result = runner.invoke(cli.app, ["verify", str(tmp_path), "--format", "json"])
+
+    payload = json.loads(result.output)
+    assert payload["summary"]["fixed"] == 0
+    assert payload["summary"]["unresolved_blocking"] == 1
+    assert payload["model"]["used"] is False
+    assert payload["decisions"][0]["status"] == "BLOCKED"
+    assert payload["decisions"][0]["patch"] is None
+
+
+@pytest.mark.parametrize("flag", ["--max-retries", "--max-llm-findings"])
+def test_invalid_loop_flags_are_config_errors(monkeypatch, tmp_path, flag):
+    no_model(monkeypatch)
+    use_gate(monkeypatch, [StubCheck("checkov", available())])
+    result = runner.invoke(cli.app, ["verify", str(tmp_path), flag, "-1"])
+    assert result.exit_code == 2
