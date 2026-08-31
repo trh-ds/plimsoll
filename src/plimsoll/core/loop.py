@@ -36,6 +36,7 @@ from plimsoll.core.models import (
     Finding,
     GateConfig,
     PatchOutcome,
+    Severity,
     VerifyResult,
 )
 from plimsoll.core.redaction import Redactor
@@ -43,6 +44,22 @@ from plimsoll.core.verifier import Verifier, build_patch
 from plimsoll.llm import LLMError, LLMProvider, LLMUnavailable
 
 log = logging.getLogger("plimsoll.loop")
+
+
+def untried_status(finding: Finding, fail_on: Severity) -> DecisionStatus:
+    """The status for a finding no model was asked about.
+
+    Below the threshold, past the cap, or running deterministic-only. Never `PASS`: it is
+    a real violation, and saying otherwise would be the exact dishonesty this project
+    exists to prevent.
+
+    A module function rather than a method because `plimsoll scan` needs the same rule to
+    write a provenance record, and two copies of it would eventually disagree about what
+    a finding below the threshold means.
+    """
+    if finding.severity.meets(fail_on):
+        return DecisionStatus.BLOCKED
+    return DecisionStatus.REPORTED
 
 
 def _attach(decision: Decision, ref: ExceptionRef | None) -> Decision:
@@ -131,15 +148,7 @@ class VerifierLoop:
         return result
 
     def _untried_status(self, finding: Finding) -> DecisionStatus:
-        """The status for a finding no model was asked about.
-
-        Below the threshold, past the cap, or running deterministic-only. Never `PASS`:
-        it is a real violation, and saying otherwise would be the exact dishonesty this
-        project exists to prevent.
-        """
-        if finding.severity.meets(self._config.fail_on):
-            return DecisionStatus.BLOCKED
-        return DecisionStatus.REPORTED
+        return untried_status(finding, self._config.fail_on)
 
     def _untried(self, finding: Finding, ref: ExceptionRef | None = None) -> Decision:
         if ref is not None and not ref.expired:

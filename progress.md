@@ -234,6 +234,22 @@ against it.
 
 **Exit criterion:** stable hash-verified provenance record, exception correctly attributed, no secret surviving redaction.
 
+### 2026-09-01 — Provenance
+
+**What changed:** `core/provenance.py` (`RepoContext`, `ModelIdentity`, `RunSummary`, `Signature`, `ProvenancePatch`, `ProvenanceDecision`, `ProvenanceRecord`), `core/schema.py` to regenerate `schemas/provenance-0.1.json`, and `--provenance` / `--generated-by` on `scan`, `verify`, and `explain`. 22 new tests.
+
+**Now unblocked:** Phase 3's exit criterion. A run is now checkable by someone who was not there: which binaries at which versions, which model, which commit, which workspace bytes, one entry per finding, and a hash over all of it.
+
+**Decision — `Patch.new_content` has no field in the record, rather than being redacted into one.** It is the corrected file with every redacted secret *restored* — it has to be, or a patch would write placeholders back into the user's repository. `ProvenancePatch` carries the diff and the rationale, both through `redact()`, and nothing else. A field that must be remembered to be stripped is a field that will eventually not be; a field that does not exist cannot leak. This was the one place invariant 6 was still reachable.
+
+**Decision — `plimsoll scan` writes a record too, with a decision per finding.** A record whose `decisions` list is empty would make a clean run and a scan of a broken workspace look the same. The untried statuses come from `core.loop.untried_status`, which the loop itself now calls, so the two cannot drift.
+
+**Decision — the workspace hash covers `.plimsoll/` and skips `.terraform/` and state files.** The exception store is an input to every decision in the record, so a change to it must change the hash. Downloaded providers are not configuration, and Terraform state holds every attribute of every deployed resource in plaintext — not hashing it means not reading it.
+
+**Surprise — hashing concatenated bytes would have been wrong.** A single stream over the file contents cannot tell `a.tf` + `b.tf` from one file holding both, so moving a resource between files would not change the hash. Per-file digests keyed by relative path, sorted, then hashed. There is a test for exactly that rename.
+
+**Still open:** `signature` is reserved and always null. It is in the schema now so that adding Sigstore in v0.2 is not a breaking change for anything already parsing these records.
+
 ### 2026-09-01 — The whole-run timeout and exit code 4
 
 **What changed:** `--timeout` is now the whole-run budget with a default of 600, as the CLI contract always said it was; `--check-timeout` (default 120) is the per-subprocess value `--timeout` used to mean. `VerifierLoop.run` and `Verifier` both take the run's `Deadline`, checked between findings and between patch attempts. `timed_out` maps to exit 4, checked ahead of every other condition, and both reporters lead with it.

@@ -1,0 +1,662 @@
+{
+  "$defs": {
+    "CheckSource": {
+      "description": "The adapter a finding came from.\n\nSPEC: `specifications.md` names these four for v0.1. A new adapter adds a member\nhere as well as a module -- `architecture.md` describes adding one as \"one file plus\none fixture\", which is one line short.",
+      "enum": [
+        "terraform_validate",
+        "terraform_plan",
+        "checkov",
+        "opa"
+      ],
+      "title": "CheckSource",
+      "type": "string"
+    },
+    "DecisionStatus": {
+      "description": "The outcome for one finding.\n\nSPEC: `REPORTED` is not in `specifications.md`. It was added because the original\nfive statuses had no honest home for \"a real violation, below `--fail-on`, never\nsent to the model\". `PASS` means no violation, which would have been a lie, and\n`BLOCKED` means the run fails, which it does not. A tool whose entire thesis is that\nsilence must not read as success cannot mislabel its own output.",
+      "enum": [
+        "PASS",
+        "FIXED",
+        "ESCALATED",
+        "EXEMPTED",
+        "BLOCKED",
+        "REPORTED"
+      ],
+      "title": "DecisionStatus",
+      "type": "string"
+    },
+    "ExceptionRef": {
+      "description": "The recorded exception a finding matched, attached to its `Decision`.\n\nCarries the justification and approver rather than just an identifier, so a\nprovenance record answers \"who accepted this, and why\" without needing the\nrepository it came from.",
+      "properties": {
+        "approved_by": {
+          "title": "Approved By",
+          "type": "string"
+        },
+        "approved_in": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Approved In"
+        },
+        "created": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Created"
+        },
+        "expired": {
+          "default": false,
+          "title": "Expired",
+          "type": "boolean"
+        },
+        "expires": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expires"
+        },
+        "justification": {
+          "title": "Justification",
+          "type": "string"
+        },
+        "resource_address": {
+          "title": "Resource Address",
+          "type": "string"
+        },
+        "rule_class": {
+          "title": "Rule Class",
+          "type": "string"
+        }
+      },
+      "required": [
+        "rule_class",
+        "resource_address",
+        "justification",
+        "approved_by"
+      ],
+      "title": "ExceptionRef",
+      "type": "object"
+    },
+    "Finding": {
+      "description": "One normalised violation, as produced by a `Check` adapter.\n\nSPEC: `specifications.md` describes `raw` as \"unmodified tool output\" and says\nredaction runs before serialisation. It runs *at construction* instead. `raw` holds\nwhatever the tool chose to include, which for a hardcoded-credential finding is the\ncredential; that value then flows into the reporters, into provenance, and into\nprompts. Redacting at each of those boundaries means a new boundary added later\nleaks by default. Redacting once, here, means it cannot: there is no moment at which\nan unredacted `Finding` exists.",
+      "properties": {
+        "also_reported_by": {
+          "items": {
+            "$ref": "#/$defs/CheckSource"
+          },
+          "title": "Also Reported By",
+          "type": "array"
+        },
+        "benchmark_refs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Benchmark Refs",
+          "type": "array"
+        },
+        "file": {
+          "format": "path",
+          "title": "File",
+          "type": "string"
+        },
+        "id": {
+          "default": "",
+          "title": "Id",
+          "type": "string"
+        },
+        "line_end": {
+          "title": "Line End",
+          "type": "integer"
+        },
+        "line_start": {
+          "title": "Line Start",
+          "type": "integer"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "raw": {
+          "additionalProperties": true,
+          "title": "Raw",
+          "type": "object"
+        },
+        "resource_address": {
+          "title": "Resource Address",
+          "type": "string"
+        },
+        "resource_type": {
+          "title": "Resource Type",
+          "type": "string"
+        },
+        "rule_class": {
+          "title": "Rule Class",
+          "type": "string"
+        },
+        "rule_id": {
+          "title": "Rule Id",
+          "type": "string"
+        },
+        "severity": {
+          "$ref": "#/$defs/Severity"
+        },
+        "source": {
+          "$ref": "#/$defs/CheckSource"
+        }
+      },
+      "required": [
+        "source",
+        "rule_id",
+        "rule_class",
+        "severity",
+        "resource_address",
+        "resource_type",
+        "file",
+        "line_start",
+        "line_end",
+        "message"
+      ],
+      "title": "Finding",
+      "type": "object"
+    },
+    "ModelIdentity": {
+      "description": "Which model was consulted. Null in deterministic mode.\n\nThere is no field for the API key and there never will be one. `LLMConfig` reads it\nand nothing else ever sees it.",
+      "properties": {
+        "max_retries": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Retries"
+        },
+        "model": {
+          "title": "Model",
+          "type": "string"
+        },
+        "provider": {
+          "title": "Provider",
+          "type": "string"
+        },
+        "temperature": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Temperature"
+        }
+      },
+      "required": [
+        "provider",
+        "model"
+      ],
+      "title": "ModelIdentity",
+      "type": "object"
+    },
+    "PatchOutcome": {
+      "description": "How a patch fared against the re-run gate.",
+      "enum": [
+        "verified",
+        "regressed",
+        "ineffective",
+        "invalid"
+      ],
+      "title": "PatchOutcome",
+      "type": "string"
+    },
+    "PatchVerification": {
+      "description": "The gate's judgement on a patch. Produced only by `core.verifier`.",
+      "properties": {
+        "failure_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Failure Reason"
+        },
+        "new_findings": {
+          "items": {
+            "$ref": "#/$defs/Finding"
+          },
+          "title": "New Findings",
+          "type": "array"
+        },
+        "outcome": {
+          "$ref": "#/$defs/PatchOutcome"
+        },
+        "removed_findings": {
+          "items": {
+            "$ref": "#/$defs/Finding"
+          },
+          "title": "Removed Findings",
+          "type": "array"
+        },
+        "target_resolved": {
+          "default": false,
+          "title": "Target Resolved",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "outcome"
+      ],
+      "title": "PatchVerification",
+      "type": "object"
+    },
+    "ProvenanceDecision": {
+      "description": "One decision, as recorded.",
+      "properties": {
+        "attempts": {
+          "default": 0,
+          "title": "Attempts",
+          "type": "integer"
+        },
+        "exception_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExceptionRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "explanation": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Explanation"
+        },
+        "finding": {
+          "$ref": "#/$defs/Finding"
+        },
+        "patch": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProvenancePatch"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "status": {
+          "$ref": "#/$defs/DecisionStatus"
+        },
+        "verification": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PatchVerification"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "finding",
+        "status"
+      ],
+      "title": "ProvenanceDecision",
+      "type": "object"
+    },
+    "ProvenancePatch": {
+      "description": "A verified patch, as recorded. Deliberately narrower than `Patch`.\n\n`Patch.new_content` is the corrected file with every redacted secret *restored* --\nit has to be, or the patch would write placeholders back into the user's repository.\nSerialising it would put live credentials in a file people commit and attach to\ntickets. It is not redacted here; there is no field for it to be redacted into.",
+      "properties": {
+        "attempt": {
+          "title": "Attempt",
+          "type": "integer"
+        },
+        "diff": {
+          "default": "",
+          "title": "Diff",
+          "type": "string"
+        },
+        "files_touched": {
+          "items": {
+            "format": "path",
+            "type": "string"
+          },
+          "title": "Files Touched",
+          "type": "array"
+        },
+        "rationale": {
+          "default": "",
+          "title": "Rationale",
+          "type": "string"
+        },
+        "target_finding_id": {
+          "title": "Target Finding Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "target_finding_id",
+        "attempt"
+      ],
+      "title": "ProvenancePatch",
+      "type": "object"
+    },
+    "RepoContext": {
+      "description": "Where the judged configuration came from. Every field is best-effort.",
+      "properties": {
+        "branch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Branch"
+        },
+        "commit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Commit"
+        },
+        "pr_number": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pr Number"
+        },
+        "remote": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Remote"
+        }
+      },
+      "title": "RepoContext",
+      "type": "object"
+    },
+    "RunSummary": {
+      "description": "Counts, so a reader gets the shape of the run before reading the decisions.\n\nSPEC: `specifications.md` shows total, fixed, escalated, exempted, and blocked.\n`reported`, `expired_exceptions`, and `timed_out` are added. The first is where a\nbelow-threshold finding is counted -- without it the numbers do not add up to\n`total`, and a summary that does not reconcile invites the reader to assume the\ndifference was nothing. The other two are conditions under which the rest of the\nsummary is not what it appears.",
+      "properties": {
+        "blocked": {
+          "default": 0,
+          "title": "Blocked",
+          "type": "integer"
+        },
+        "escalated": {
+          "default": 0,
+          "title": "Escalated",
+          "type": "integer"
+        },
+        "exempted": {
+          "default": 0,
+          "title": "Exempted",
+          "type": "integer"
+        },
+        "expired_exceptions": {
+          "default": 0,
+          "title": "Expired Exceptions",
+          "type": "integer"
+        },
+        "fixed": {
+          "default": 0,
+          "title": "Fixed",
+          "type": "integer"
+        },
+        "reported": {
+          "default": 0,
+          "title": "Reported",
+          "type": "integer"
+        },
+        "timed_out": {
+          "default": false,
+          "title": "Timed Out",
+          "type": "boolean"
+        },
+        "total": {
+          "default": 0,
+          "title": "Total",
+          "type": "integer"
+        }
+      },
+      "title": "RunSummary",
+      "type": "object"
+    },
+    "Severity": {
+      "description": "Finding severity. Mapped from source tools by `checks.severity_map`, never inferred.",
+      "enum": [
+        "CRITICAL",
+        "HIGH",
+        "MEDIUM",
+        "LOW",
+        "INFO"
+      ],
+      "title": "Severity",
+      "type": "string"
+    },
+    "Signature": {
+      "description": "Reserved for v0.2 (Sigstore keyless). Always null in v0.1.\n\nPresent in the schema now so adding it later is not a breaking change for anything\nthat already parses these records.",
+      "properties": {
+        "certificate": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Certificate"
+        },
+        "format": {
+          "title": "Format",
+          "type": "string"
+        },
+        "value": {
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "format",
+        "value"
+      ],
+      "title": "Signature",
+      "type": "object"
+    },
+    "SkippedCheck": {
+      "description": "A check that did not run because its binary was unavailable.",
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "reason"
+      ],
+      "title": "SkippedCheck",
+      "type": "object"
+    },
+    "ToolVersion": {
+      "description": "An external tool that ran, and at what version. Feeds `ProvenanceRecord.tooling`.",
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Version"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "ToolVersion",
+      "type": "object"
+    }
+  },
+  "description": "One run, in full. Per `specifications.md`.",
+  "properties": {
+    "checks_skipped": {
+      "items": {
+        "$ref": "#/$defs/SkippedCheck"
+      },
+      "title": "Checks Skipped",
+      "type": "array"
+    },
+    "content_hash": {
+      "default": "",
+      "title": "Content Hash",
+      "type": "string"
+    },
+    "decisions": {
+      "items": {
+        "$ref": "#/$defs/ProvenanceDecision"
+      },
+      "title": "Decisions",
+      "type": "array"
+    },
+    "generated_by": {
+      "default": "unknown",
+      "title": "Generated By",
+      "type": "string"
+    },
+    "model": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ModelIdentity"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "repository": {
+      "$ref": "#/$defs/RepoContext"
+    },
+    "run_id": {
+      "title": "Run Id",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "0.1",
+      "default": "0.1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "signature": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Signature"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "summary": {
+      "$ref": "#/$defs/RunSummary"
+    },
+    "timestamp": {
+      "format": "date-time",
+      "title": "Timestamp",
+      "type": "string"
+    },
+    "tooling": {
+      "items": {
+        "$ref": "#/$defs/ToolVersion"
+      },
+      "title": "Tooling",
+      "type": "array"
+    },
+    "workspace_hash": {
+      "title": "Workspace Hash",
+      "type": "string"
+    }
+  },
+  "required": [
+    "run_id",
+    "timestamp",
+    "workspace_hash"
+  ],
+  "title": "ProvenanceRecord",
+  "type": "object"
+}

@@ -26,6 +26,12 @@ from plimsoll.core.models import (
     Severity,
     VerifyResult,
 )
+from plimsoll.core.provenance import (
+    ModelIdentity,
+    build_record,
+    gate_as_verify_result,
+    write_record,
+)
 from plimsoll.llm import LLMConfig, LLMError, LLMProvider, build_provider
 from plimsoll.reporters import (
     render_json,
@@ -50,6 +56,11 @@ DEFAULT_CHECK_TIMEOUT_SECONDS = 120
 
 _TIMEOUT_HELP = "Whole-run budget in seconds."
 _CHECK_TIMEOUT_HELP = "Per-subprocess timeout in seconds, capped by --timeout."
+_PROVENANCE_HELP = "Write the JSON provenance record for this run to PATH."
+_GENERATED_BY_HELP = "Who or what wrote this configuration. Recorded in provenance."
+
+ProvenanceOption = Annotated[Path | None, typer.Option("--provenance", help=_PROVENANCE_HELP)]
+GeneratedByOption = Annotated[str | None, typer.Option("--generated-by", help=_GENERATED_BY_HELP)]
 
 
 class OutputFormat(StrEnum):
@@ -122,6 +133,42 @@ def _load_exceptions(path: Path) -> ExceptionStore:
         raise typer.Exit(ExitCode.CONFIG_ERROR) from exc
 
 
+def _write_provenance(
+    result: VerifyResult,
+    path: Path,
+    workspace: Path,
+    *,
+    model: ModelIdentity | None,
+    generated_by: str | None,
+) -> None:
+    """Emit the record, or say why not.
+
+    A failure to write is reported and does not change the exit code. The exit code
+    describes the configuration that was judged; a full disk is a fact about the runner.
+    """
+    try:
+        written = write_record(
+            build_record(result, workspace, model=model, generated_by=generated_by), path
+        )
+    except OSError as exc:
+        typer.echo(f"could not write the provenance record to {path}: {exc}", err=True)
+        return
+    typer.echo(f"Provenance written to {written}", err=True)
+
+
+def _model_identity(provider: LLMProvider | None) -> ModelIdentity | None:
+    """Which model was consulted, for the record. Never carries the API key."""
+    if provider is None:
+        return None
+    config = LLMConfig.from_env()
+    return ModelIdentity(
+        provider=config.provider,
+        model=config.model,
+        temperature=config.temperature,
+        max_retries=config.max_retries,
+    )
+
+
 def _resolve_provider(no_llm: bool) -> tuple[LLMProvider | None, str | None]:
     """Build the configured provider, or explain why there is none.
 
@@ -162,6 +209,8 @@ def scan(
     check_timeout: Annotated[
         int, typer.Option("--check-timeout", help=_CHECK_TIMEOUT_HELP)
     ] = DEFAULT_CHECK_TIMEOUT_SECONDS,
+    provenance: ProvenanceOption = None,
+    generated_by: GeneratedByOption = None,
 ) -> None:
     """Run the deterministic gate. No model is involved."""
     _validate_common(path, policy_dir, timeout, check_timeout)
@@ -171,6 +220,15 @@ def scan(
         check=CheckConfig(timeout_seconds=check_timeout, policy_dir=policy_dir),
     )
     result = default_gate().run(path, config, Deadline(timeout))
+
+    if provenance is not None:
+        _write_provenance(
+            gate_as_verify_result(result, fail_on),
+            provenance,
+            path,
+            model=None,
+            generated_by=generated_by,
+        )
 
     if output_format is OutputFormat.JSON:
         typer.echo(render_json(result, fail_on=fail_on))
@@ -190,6 +248,8 @@ def _run_loop(
     max_retries: int,
     max_llm_findings: int,
     explain_only: bool,
+    provenance: Path | None = None,
+    generated_by: str | None = None,
 ) -> None:
     _validate_common(path, policy_dir, timeout, check_timeout)
     if max_retries < 0:
@@ -217,6 +277,15 @@ def _run_loop(
     result = loop.run(path, explain_only=explain_only, deadline=Deadline(timeout))
     if provider is None and reason:
         result.llm_unavailable_reason = reason
+
+    if provenance is not None:
+        _write_provenance(
+            result,
+            provenance,
+            path,
+            model=_model_identity(provider),
+            generated_by=generated_by,
+        )
 
     if output_format is OutputFormat.JSON:
         typer.echo(render_verify_json(result, fail_on=fail_on))
@@ -253,6 +322,8 @@ def verify(
         int,
         typer.Option("--max-llm-findings", help="Cap on findings sent to the model."),
     ] = 25,
+    provenance: ProvenanceOption = None,
+    generated_by: GeneratedByOption = None,
 ) -> None:
     """Scan, draft fixes, re-verify them through the same gate, escalate what fails.
 
@@ -270,6 +341,8 @@ def verify(
         max_retries,
         max_llm_findings,
         explain_only=False,
+        provenance=provenance,
+        generated_by=generated_by,
     )
 
 
@@ -294,6 +367,8 @@ def explain(
     max_llm_findings: Annotated[
         int, typer.Option("--max-llm-findings", help="Cap on findings sent to the model.")
     ] = 25,
+    provenance: ProvenanceOption = None,
+    generated_by: GeneratedByOption = None,
 ) -> None:
     """Scan and explain the findings in prose. No patches are drafted."""
     _run_loop(
@@ -307,6 +382,8 @@ def explain(
         max_retries=0,
         max_llm_findings=max_llm_findings,
         explain_only=True,
+        provenance=provenance,
+        generated_by=generated_by,
     )
 
 
