@@ -31,6 +31,12 @@ from plimsoll.core.models import (
 
 TITLE = "## Plimsoll"
 
+# An HTML comment, so it renders as nothing and survives GitHub's markdown pipeline
+# intact. It exists so a poster can find the comment it wrote last time and edit it
+# rather than adding another: a bot that appends a fresh comment on every push turns a
+# ten-commit pull request into ten copies of the same report, and reviewers mute it.
+MARKER = "<!-- plimsoll:report -->"
+
 _ICONS: dict[Severity, str] = {
     Severity.CRITICAL: "🔴",
     Severity.HIGH: "🟠",
@@ -137,6 +143,7 @@ def _footer(result: GateResult) -> list[str]:
     for failed in result.checks_failed:
         lines.append(f"<br>**Failed** {failed.name}: {failed.error}")
     lines.append("</sub>")
+    lines.append(MARKER)
     return lines
 
 

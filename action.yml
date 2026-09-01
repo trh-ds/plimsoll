@@ -1,0 +1,160 @@
+# The action metadata lives at the repository root, not beside the Dockerfile in
+# `action/`, for two reasons:
+#
+#   A container action's build context is the directory holding this file. From
+#   `action/` the image could not see `src/`, so it could not install the package it
+#   exists to run.
+#
+#   `uses: <owner>/plimsoll@v0` resolves here. Keeping it at the root means one
+#   repository rather than a second `plimsoll-action` repository to keep in step with
+#   this one, which is a synchronisation problem nobody was asking for.
+#
+# The image is built on the runner, which costs a few minutes on a cold cache. When
+# there is a published image, `image:` becomes a `docker://` reference and that cost
+# goes away without any caller changing a line.
+name: Plimsoll
+description: Verify AI-generated Terraform against a deterministic gate, and re-verify every fix it proposes.
+author: plimsoll
+
+branding:
+  icon: anchor
+  color: blue
+
+# Inputs mirror the CLI flags one for one, and are named after them. A wrapper that
+# invented its own vocabulary would mean two things to learn and two places for the
+# defaults to drift apart.
+inputs:
+  path:
+    description: Directory of Terraform to check, relative to the repository root.
+    required: false
+    default: "."
+  command:
+    description: >-
+      scan (deterministic only, no model), verify (draft fixes and re-verify them
+      through the same gate), or explain (prose, no patches).
+    required: false
+    default: scan
+  fail-on:
+    description: Minimum severity that fails the job -- critical, high, medium, low, or info.
+    required: false
+    default: high
+  policy-dir:
+    description: An additional Rego policy directory, evaluated alongside the bundled pack.
+    required: false
+    default: ""
+  timeout:
+    description: Whole-run budget in seconds. A run that exceeds it exits 4 and never reports clean.
+    required: false
+    default: "600"
+  check-timeout:
+    description: >-
+      Per-subprocess timeout in seconds, capped by `timeout`. Raise it when a cold
+      provider download is slow; the default is 120.
+    required: false
+    default: "120"
+  no-llm:
+    description: >-
+      Deterministic mode for `verify`. Ignored by `scan`, which never contacts a model.
+      An unreachable provider degrades to this on its own -- it is never a hard failure.
+    required: false
+    default: "false"
+  max-retries:
+    description: Patch attempts per finding before the run escalates with the original finding.
+    required: false
+    default: "2"
+  generated-by:
+    description: Who or what wrote this configuration. Recorded in the provenance record.
+    required: false
+    default: ""
+  sarif:
+    description: Write a SARIF 2.1.0 report, for upload to code scanning.
+    required: false
+    default: "true"
+  comment:
+    description: Render the pull request comment to a file. See `pr-comment` to post it.
+    required: false
+    default: "true"
+  pr-comment:
+    description: >-
+      Post the rendered report to the pull request, editing the previous one in place
+      rather than adding another. Needs `permissions: pull-requests: write` and
+      `github-token`.
+    required: false
+    default: "false"
+  github-token:
+    description: Token used to post the pull request comment. Usually secrets.GITHUB_TOKEN.
+    required: false
+    default: ""
+  provenance:
+    description: Write the JSON provenance record for this run.
+    required: false
+    default: "true"
+  report-dir:
+    description: Directory the reports are written to.
+    required: false
+    default: plimsoll-reports
+  fail-on-findings:
+    description: >-
+      Whether findings at or above `fail-on` fail the job. Set false to report without
+      blocking. This suppresses exit 1 and nothing else: a run where no check could
+      start, or one that timed out, still fails, because neither is a pass.
+    required: false
+    default: "true"
+
+outputs:
+  findings:
+    description: Total findings, at every severity.
+  blocking:
+    description: Findings at or above `fail-on`.
+  fixed:
+    description: Findings fixed by a patch that passed re-verification. Always 0 for `scan`.
+  escalated:
+    description: Findings that could not be fixed and need a human.
+  exempted:
+    description: Findings matched by a live entry in .plimsoll/exceptions.yaml.
+  exit-code:
+    description: >-
+      The CLI's own code, passed through untranslated -- 0 clean, 1 findings, 2 config
+      error, 3 nothing ran, 4 timed out. Set even when `fail-on-findings` is false.
+  report-dir:
+    description: Directory holding every report this run wrote.
+  json-report:
+    description: Path to the machine-readable report.
+  sarif-report:
+    description: Path to the SARIF report, when `sarif` is on.
+  comment-report:
+    description: Path to the rendered markdown comment, when `comment` is on.
+  provenance:
+    description: Path to the provenance record, when `provenance` is on.
+
+runs:
+  using: docker
+  image: action/Dockerfile
+  # Every input is mapped explicitly rather than left to the automatic INPUT_* variables.
+  # The runner uppercases an input name and replaces spaces, but it does *not* replace
+  # hyphens -- so `fail-on` arrives as `INPUT_FAIL-ON`, which a shell cannot expand as a
+  # variable at all (`$INPUT_FAIL-ON` reads as `$INPUT_FAIL` followed by the text `-ON`).
+  # That failure is silent: the entrypoint would quietly fall back to every default and
+  # report on a threshold nobody chose. Naming them here costs a line each and removes
+  # the whole class of bug.
+  #
+  # No `args` for the same reason positional arguments are avoided elsewhere: adding an
+  # input should be one block above and one line in the entrypoint, not a list to keep
+  # in order in three places.
+  env:
+    GITHUB_TOKEN: ${{ inputs.github-token }}
+    INPUT_PATH: ${{ inputs.path }}
+    INPUT_COMMAND: ${{ inputs.command }}
+    INPUT_FAIL_ON: ${{ inputs.fail-on }}
+    INPUT_POLICY_DIR: ${{ inputs.policy-dir }}
+    INPUT_TIMEOUT: ${{ inputs.timeout }}
+    INPUT_CHECK_TIMEOUT: ${{ inputs.check-timeout }}
+    INPUT_NO_LLM: ${{ inputs.no-llm }}
+    INPUT_MAX_RETRIES: ${{ inputs.max-retries }}
+    INPUT_GENERATED_BY: ${{ inputs.generated-by }}
+    INPUT_SARIF: ${{ inputs.sarif }}
+    INPUT_COMMENT: ${{ inputs.comment }}
+    INPUT_PR_COMMENT: ${{ inputs.pr-comment }}
+    INPUT_PROVENANCE: ${{ inputs.provenance }}
+    INPUT_REPORT_DIR: ${{ inputs.report-dir }}
+    INPUT_FAIL_ON_FINDINGS: ${{ inputs.fail-on-findings }}

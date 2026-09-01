@@ -145,3 +145,64 @@ jobs:
           name: sarif
           path: violating.sarif
           if-no-files-found: ignore
+
+  action-image:
+    # The Action is a container, and a container is only correct once it has been built.
+    # Nothing in the unit suite or the job above touches the Dockerfile, the entrypoint,
+    # or the argument assembly -- this is the only thing that does.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Build the image
+        run: docker build -f action/Dockerfile -t plimsoll-action:ci .
+
+      - name: The pinned binaries are all present inside it
+        run: |
+          set -euo pipefail
+          docker run --rm --entrypoint plimsoll plimsoll-action:ci doctor | tee doctor.txt
+          # `doctor` exits 3 only when nothing can run, so grep for the adapters by name:
+          # a silently missing one would otherwise pass here and skip in production.
+          for check in checkov opa terraform_plan terraform_validate; do
+            grep -q "^ok  *${check}\b" doctor.txt \
+              || { echo "::error::${check} is not available in the image"; exit 1; }
+          done
+
+      - name: The entrypoint runs the gate and writes every report
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -e INPUT_PATH=tests/fixtures/rules/violating \
+            -e INPUT_REPORT_DIR=/github/workspace/out \
+            -e GITHUB_OUTPUT=/github/workspace/out/github_output \
+            -e GITHUB_STEP_SUMMARY=/github/workspace/out/summary.md \
+            -v "${PWD}:/github/workspace" \
+            -w /github/workspace \
+            plimsoll-action:ci && status=0 || status=$?
+          test "$status" -eq 1 \
+            || { echo "::error::expected exit 1 from the violating corpus, got $status"; exit 1; }
+          for file in out/plimsoll.json out/plimsoll.sarif out/plimsoll-comment.md out/provenance.json; do
+            test -s "$file" || { echo "::error::${file} was not written"; exit 1; }
+          done
+          # The outputs a caller's workflow reads. A blocking count of zero here would
+          # mean the entrypoint published numbers the report does not support.
+          grep -qE '^blocking=[1-9]' out/github_output \
+            || { echo "::error::blocking output was not set"; cat out/github_output; exit 1; }
+
+      - name: fail-on-findings suppresses exit 1 and nothing else
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -e INPUT_PATH=tests/fixtures/rules/violating \
+            -e INPUT_FAIL_ON_FINDINGS=false \
+            -e INPUT_REPORT_DIR=/github/workspace/out2 \
+            -v "${PWD}:/github/workspace" \
+            -w /github/workspace \
+            plimsoll-action:ci
+          # ...and a directory no check can read still fails, because that is not a pass.
+          docker run --rm \
+            -e INPUT_PATH=does-not-exist \
+            -e INPUT_FAIL_ON_FINDINGS=false \
+            -v "${PWD}:/github/workspace" \
+            -w /github/workspace \
+            plimsoll-action:ci && exit 1 || true

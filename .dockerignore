@@ -1,0 +1,17 @@
+# The Action's image build context is the repository root, and everything here would
+# either bloat the layer or invalidate its cache on an unrelated change.
+.git
+.github
+.venv
+.mypy_cache
+.pytest_cache
+.ruff_cache
+**/__pycache__
+**/*.pyc
+**/.terraform
+**/*.tfstate
+**/*.tfstate.backup
+benchmarks
+plimsoll-reports
+*.md
+!README.md
