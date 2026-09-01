@@ -336,3 +336,99 @@ def test_a_malformed_exception_store_stops_verify(monkeypatch, tmp_path):
 
     result = runner.invoke(cli.app, ["verify", str(tmp_path)])
     assert result.exit_code == 2
+
+
+# --- `--report FORMAT=PATH` --------------------------------------------------------
+#
+# A CI job wants three renderings of one run. Before this existed it had to invoke the
+# tool once per format, and the gate is a terraform init, a plan, and an opa eval -- so
+# three formats cost three plans and could disagree with each other.
+
+
+def test_several_reports_come_from_one_run(monkeypatch, tmp_path):
+    check = StubCheck("checkov", available(), [finding(Severity.CRITICAL)])
+    use_gate(monkeypatch, [check])
+    sarif = tmp_path / "out.sarif"
+    comment = tmp_path / "comment.md"
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "scan",
+            str(tmp_path),
+            "--report",
+            f"sarif={sarif}",
+            "--report",
+            f"github={comment}",
+            "--format",
+            "json",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert json.loads(sarif.read_text(encoding="utf-8"))["version"] == "2.1.0"
+    assert comment.read_text(encoding="utf-8").startswith("## Plimsoll")
+    # And stdout is still the format that was asked for, untouched by the side files.
+    assert json.loads(result.stdout)["summary"]["findings"] == 1
+
+
+def test_a_report_path_creates_its_directory(monkeypatch, tmp_path):
+    use_gate(monkeypatch, [StubCheck("checkov", available())])
+    target = tmp_path / "nested" / "reports" / "out.json"
+
+    result = runner.invoke(cli.app, ["scan", str(tmp_path), "--report", f"json={target}"])
+
+    assert result.exit_code == 0
+    assert json.loads(target.read_text(encoding="utf-8"))["summary"]["findings"] == 0
+
+
+def test_verify_reports_record_that_no_model_was_used(monkeypatch, tmp_path):
+    """The reason is attached after the loop returns, so the report has to be written
+    after it too -- otherwise the file reads as a run where the model found nothing."""
+    no_model(monkeypatch)
+    use_gate(monkeypatch, [StubCheck("checkov", available(), [finding(Severity.CRITICAL)])])
+    target = tmp_path / "verify.json"
+
+    result = runner.invoke(cli.app, ["verify", str(tmp_path), "--report", f"json={target}"])
+
+    assert result.exit_code == 1
+    payload = json.loads(target.read_text(encoding="utf-8"))
+    assert payload["model"]["used"] is False
+    assert payload["model"]["unavailable_reason"]
+
+
+@pytest.mark.parametrize("spec", ["sarif", "=out.sarif", "sarif=", "xml=out.xml", ""])
+def test_a_malformed_report_spec_is_a_config_error(monkeypatch, tmp_path, spec):
+    use_gate(monkeypatch, [StubCheck("checkov", available())])
+    result = runner.invoke(cli.app, ["scan", str(tmp_path), "--report", spec])
+    assert result.exit_code == 2
+
+
+def test_a_bad_report_spec_is_caught_before_the_gate_runs(monkeypatch, tmp_path):
+    """Failing after a two-minute plan to say a flag was misspelled is a bad trade."""
+    ran = []
+
+    class Recording(StubCheck):
+        def run(self, ctx):
+            ran.append(ctx)
+            return []
+
+    use_gate(monkeypatch, [Recording("checkov", available())])
+    result = runner.invoke(cli.app, ["scan", str(tmp_path), "--report", "xml=out.xml"])
+
+    assert result.exit_code == 2
+    assert ran == []
+
+
+def test_an_unwritable_report_does_not_change_the_exit_code(monkeypatch, tmp_path):
+    """The exit code describes the configuration that was judged. A read-only mount is a
+    fact about the runner."""
+    use_gate(monkeypatch, [StubCheck("checkov", available(), [finding(Severity.CRITICAL)])])
+
+    def refuse(self, *args, **kwargs):
+        raise OSError("read-only file system")
+
+    monkeypatch.setattr(Path, "write_text", refuse)
+    result = runner.invoke(cli.app, ["scan", str(tmp_path), "--report", "json=out.json"])
+
+    assert result.exit_code == 1

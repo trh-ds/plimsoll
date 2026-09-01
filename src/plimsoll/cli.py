@@ -8,6 +8,7 @@ Exit codes come from the gate and the decisions, never from anything a model sai
 from __future__ import annotations
 
 import sys
+from collections.abc import Callable
 from datetime import date
 from enum import StrEnum
 from pathlib import Path
@@ -62,9 +63,11 @@ _TIMEOUT_HELP = "Whole-run budget in seconds."
 _CHECK_TIMEOUT_HELP = "Per-subprocess timeout in seconds, capped by --timeout."
 _PROVENANCE_HELP = "Write the JSON provenance record for this run to PATH."
 _GENERATED_BY_HELP = "Who or what wrote this configuration. Recorded in provenance."
+_REPORT_HELP = "Also write FORMAT=PATH. Repeatable, e.g. --report sarif=out.sarif."
 
 ProvenanceOption = Annotated[Path | None, typer.Option("--provenance", help=_PROVENANCE_HELP)]
 GeneratedByOption = Annotated[str | None, typer.Option("--generated-by", help=_GENERATED_BY_HELP)]
+ReportOption = Annotated[list[str] | None, typer.Option("--report", help=_REPORT_HELP)]
 
 
 class OutputFormat(StrEnum):
@@ -74,20 +77,73 @@ class OutputFormat(StrEnum):
     GITHUB = "github"
 
 
+# `(result, *, fail_on) -> str` for every renderer. Spelled loosely because the two tables
+# below take different result types and are otherwise identical.
+Renderer = Callable[..., str]
+
 # One table rather than a chain of `if`s in three commands. Adding a format is a row.
-_GATE_RENDERERS = {
+_GATE_RENDERERS: dict[OutputFormat, Renderer] = {
     OutputFormat.TERMINAL: render_terminal,
     OutputFormat.JSON: render_json,
     OutputFormat.SARIF: render_sarif,
     OutputFormat.GITHUB: render_github,
 }
 
-_VERIFY_RENDERERS = {
+_VERIFY_RENDERERS: dict[OutputFormat, Renderer] = {
     OutputFormat.TERMINAL: render_verify_terminal,
     OutputFormat.JSON: render_verify_json,
     OutputFormat.SARIF: render_verify_sarif,
     OutputFormat.GITHUB: render_verify_github,
 }
+
+
+def _parse_reports(specs: list[str] | None) -> list[tuple[OutputFormat, Path]]:
+    """Parse `--report FORMAT=PATH` into pairs, or exit 2.
+
+    A CI job wants three renderings of one run: SARIF for code scanning, markdown for the
+    pull request, JSON for its own outputs. Without this it has to invoke the tool once
+    per format, and the gate is a `terraform init`, a plan, and an `opa eval` -- so three
+    formats cost three plans and can report three different results if anything in the
+    workspace moved between them. They are renderings of one decision, and they are now
+    produced from one.
+    """
+    parsed: list[tuple[OutputFormat, Path]] = []
+    for spec in specs or []:
+        name, separator, target = spec.partition("=")
+        if not separator or not target:
+            typer.echo(f"--report expects FORMAT=PATH, got {spec!r}", err=True)
+            raise typer.Exit(ExitCode.CONFIG_ERROR)
+        try:
+            output_format = OutputFormat(name.strip().lower())
+        except ValueError:
+            allowed = ", ".join(f.value for f in OutputFormat)
+            typer.echo(f"unknown report format {name!r}; expected one of: {allowed}", err=True)
+            raise typer.Exit(ExitCode.CONFIG_ERROR) from None
+        parsed.append((output_format, Path(target)))
+    return parsed
+
+
+def _write_reports(
+    reports: list[tuple[OutputFormat, Path]],
+    renderers: dict[OutputFormat, Renderer],
+    result: GateResult | VerifyResult,
+    fail_on: Severity,
+) -> None:
+    """Render each requested report to its path.
+
+    A failure to write is reported and does not change the exit code, for the same reason
+    provenance does not: the exit code describes the configuration that was judged, and a
+    read-only mount is a fact about the runner.
+    """
+    for output_format, path in reports:
+        body = renderers[output_format](result, fail_on=fail_on)
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(body + "\n", encoding="utf-8")
+        except OSError as exc:
+            typer.echo(f"could not write {output_format.value} to {path}: {exc}", err=True)
+            continue
+        typer.echo(f"{output_format.value} report written to {path}", err=True)
 
 
 app = typer.Typer(
@@ -233,15 +289,18 @@ def scan(
     ] = DEFAULT_CHECK_TIMEOUT_SECONDS,
     provenance: ProvenanceOption = None,
     generated_by: GeneratedByOption = None,
+    report: ReportOption = None,
 ) -> None:
     """Run the deterministic gate. No model is involved."""
     _validate_common(path, policy_dir, timeout, check_timeout)
+    reports = _parse_reports(report)
 
     config = GateConfig(
         fail_on=fail_on,
         check=CheckConfig(timeout_seconds=check_timeout, policy_dir=policy_dir),
     )
     result = default_gate().run(path, config, Deadline(timeout))
+    _write_reports(reports, _GATE_RENDERERS, result, fail_on)
 
     if provenance is not None:
         _write_provenance(
@@ -269,8 +328,10 @@ def _run_loop(
     explain_only: bool,
     provenance: Path | None = None,
     generated_by: str | None = None,
+    report: list[str] | None = None,
 ) -> None:
     _validate_common(path, policy_dir, timeout, check_timeout)
+    reports = _parse_reports(report)
     if max_retries < 0:
         typer.echo("--max-retries cannot be negative", err=True)
         raise typer.Exit(ExitCode.CONFIG_ERROR)
@@ -296,6 +357,10 @@ def _run_loop(
     result = loop.run(path, explain_only=explain_only, deadline=Deadline(timeout))
     if provider is None and reason:
         result.llm_unavailable_reason = reason
+
+    # After `llm_unavailable_reason` is set: a report that omitted "no model was used"
+    # would read as a run where the model had nothing to fix.
+    _write_reports(reports, _VERIFY_RENDERERS, result, fail_on)
 
     if provenance is not None:
         _write_provenance(
@@ -340,6 +405,7 @@ def verify(
     ] = 25,
     provenance: ProvenanceOption = None,
     generated_by: GeneratedByOption = None,
+    report: ReportOption = None,
 ) -> None:
     """Scan, draft fixes, re-verify them through the same gate, escalate what fails.
 
@@ -359,6 +425,7 @@ def verify(
         explain_only=False,
         provenance=provenance,
         generated_by=generated_by,
+        report=report,
     )
 
 
@@ -385,6 +452,7 @@ def explain(
     ] = 25,
     provenance: ProvenanceOption = None,
     generated_by: GeneratedByOption = None,
+    report: ReportOption = None,
 ) -> None:
     """Scan and explain the findings in prose. No patches are drafted."""
     _run_loop(
@@ -400,6 +468,7 @@ def explain(
         explain_only=True,
         provenance=provenance,
         generated_by=generated_by,
+        report=report,
     )
 
 
