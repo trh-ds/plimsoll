@@ -1,0 +1,147 @@
+name: Integration
+
+# The workflow that catches drift. Every adapter test in the unit suite runs against a
+# recorded payload, which is fast, offline, and deterministic -- and which slowly stops
+# describing reality as terraform, checkov, and opa release new versions. Nothing in the
+# unit suite can notice that. This can.
+#
+# It installs the real binaries at pinned versions, runs the `slow` tests and the Rego
+# unit tests, validates the SARIF we emit against the published schema, and then runs
+# Plimsoll against its own fixture corpus as a regression gate.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - "src/plimsoll/checks/**"
+      - "src/plimsoll/policies/**"
+      - "src/plimsoll/reporters/**"
+      - "tests/fixtures/**"
+      - ".github/workflows/integration.yml"
+      - "action/**"
+  schedule:
+    # Weekly, so a release that changes an output shape is found within days rather than
+    # by the first person to hit it.
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # Pinned deliberately. A floating "latest" would turn a tool release into a red build
+  # on an unrelated pull request, and the point of this workflow is to find drift on
+  # purpose rather than to be surprised by it.
+  TERRAFORM_VERSION: "1.15.8"
+  OPA_VERSION: "v1.20.1"
+  CHECKOV_VERSION: "3.3.15"
+
+jobs:
+  real-binaries:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
+        with:
+          enable-cache: true
+
+      - name: Install terraform
+        run: |
+          set -euo pipefail
+          curl -fsSL -o terraform.zip \
+            "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip"
+          unzip -q terraform.zip
+          sudo install -m 0755 terraform /usr/local/bin/terraform
+          terraform version
+
+      - name: Install opa
+        run: |
+          set -euo pipefail
+          curl -fsSL -o opa \
+            "https://openpolicyagent.org/downloads/${OPA_VERSION}/opa_linux_amd64_static"
+          sudo install -m 0755 opa /usr/local/bin/opa
+          opa version
+
+      - name: Install checkov
+        run: |
+          set -euo pipefail
+          uv tool install "checkov==${CHECKOV_VERSION}"
+          # `uv tool install` links into ~/.local/bin, which is not on PATH for later
+          # steps unless we put it there. Without this the adapter reports checkov
+          # missing and skips -- which is correct behaviour, and would quietly turn this
+          # job into the unit suite with extra steps.
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - run: uv sync
+
+      - name: Every adapter reports itself available
+        # The guard on everything below. `doctor` is the one command that fails loudly
+        # when a binary did not install, rather than skipping past it.
+        run: |
+          set -euo pipefail
+          uv run plimsoll doctor | tee doctor.txt
+          if grep -q '^missing' doctor.txt; then
+            echo "::error::an adapter is unavailable on a runner that installed all of them"
+            exit 1
+          fi
+
+      - name: Rego unit tests
+        run: |
+          set -euo pipefail
+          opa check --strict src/plimsoll/policies
+          opa test src/plimsoll/policies
+
+      - name: Slow tests, against the real binaries
+        run: uv run pytest -m slow
+        env:
+          # No AWS account. The provider override and placeholder credentials are what
+          # make a plan possible here, and running without credentials is the path most
+          # users are on -- so it is the path CI exercises.
+          AWS_EC2_METADATA_DISABLED: "true"
+
+      - name: Dogfood -- the violating corpus must block a merge
+        run: |
+          set -uo pipefail
+          uv run plimsoll scan tests/fixtures/rules/violating --format sarif > violating.sarif
+          status=$?
+          # Exit 1 is the contract: findings at or above the threshold. Exit 0 means the
+          # rule pack stopped firing, and exit 3 means nothing ran -- both are failures
+          # here, and both would read as success to `set -e` alone.
+          if [ "$status" -ne 1 ]; then
+            echo "::error::expected exit 1 from the violating corpus, got $status"
+            exit 1
+          fi
+
+      - name: The SARIF we emit validates against the published schema
+        # Deliberately not a unit test. Validating against the real schema means fetching
+        # it, and the unit suite makes no network calls. The URL is the same one the
+        # reporter writes into `$schema`, so this also asserts that claim is honest.
+        run: |
+          set -euo pipefail
+          uv tool install check-jsonschema
+          uv tool run check-jsonschema \
+            --schemafile "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json" \
+            violating.sarif
+
+      - name: Dogfood -- the fixed corpus must exit clean
+        run: uv run plimsoll scan tests/fixtures/rules/compliant
+
+      - name: Dogfood -- the documented smoke tests
+        # The two commands in CLAUDE.md and the README. If the quickstart is wrong, it is
+        # wrong here first rather than for the first person who tries it.
+        run: |
+          set -euo pipefail
+          uv run plimsoll scan ./tests/fixtures/compliant_s3
+          uv run plimsoll scan ./tests/fixtures/insecure_s3 && exit_code=0 || exit_code=$?
+          if [ "$exit_code" -ne 1 ]; then
+            echo "::error::expected exit 1 from insecure_s3, got $exit_code"
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: sarif
+          path: violating.sarif
+          if-no-files-found: ignore
