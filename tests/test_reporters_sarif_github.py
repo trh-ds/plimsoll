@@ -33,7 +33,13 @@ from plimsoll.core.models import (
     VerifyResult,
 )
 from plimsoll.reporters.github import render_github, render_verify_github
-from plimsoll.reporters.sarif import build_sarif, level_for, render_sarif, render_verify_sarif
+from plimsoll.reporters.sarif import (
+    SCHEMA_URI,
+    build_sarif,
+    level_for,
+    render_sarif,
+    render_verify_sarif,
+)
 
 runner = CliRunner()
 
@@ -294,3 +300,15 @@ def test_the_cli_accepts_the_new_formats(monkeypatch, tmp_path, command, output_
         assert json.loads(result.output)["version"] == "2.1.0"
     else:
         assert result.output.startswith("## Plimsoll")
+
+
+def test_the_workflow_validates_against_the_schema_we_advertise():
+    """`$schema` is a promise that some validator can act on.
+
+    The URL was wrong once already: it pointed into a branch layout the sarif-spec
+    repository has since rearranged, so every record we emitted named a 404. Nothing in
+    the suite noticed, because nothing fetched it. This does not fetch it either -- it
+    asserts that the integration workflow, which does, is fetching the same one.
+    """
+    workflow = Path(__file__).resolve().parents[1] / ".github" / "workflows" / "integration.yml"
+    assert SCHEMA_URI in workflow.read_text(encoding="utf-8")

@@ -31,7 +31,13 @@ from plimsoll.core.models import (
 )
 
 SARIF_VERSION = "2.1.0"
-SCHEMA_URI = "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema.json"
+# The OASIS errata URL, not the one in the sarif-spec repository. The GitHub raw path is
+# tied to a branch layout that has since been rearranged and now 404s, which makes
+# `$schema` a claim no validator can act on. This one is the published standard's own
+# address and is what the integration workflow validates against.
+SCHEMA_URI = (
+    "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json"
+)
 INFORMATION_URI = "https://github.com/plimsoll/plimsoll"
 
 # SARIF has three levels and Plimsoll has five. CRITICAL and HIGH both block a merge, so
