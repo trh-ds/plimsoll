@@ -193,16 +193,35 @@ def init(monkeypatch, tmp_path, fake, deadline=None):
 _DIAL = "Error: Failed to install provider\n\ndial tcp 1.2.3.4:443: i/o timeout"
 _BAD_CONFIG = 'Error: Invalid provider requirement\n\non main.tf line 3: version "~> not-a-version"'
 
+# Captured verbatim from `uv run plimsoll scan tests/fixtures/compliant_s3` on Windows,
+# terraform 1.15.8, on a connection whose IPv6 route to releases.hashicorp.com times out.
+# Kept exactly as terraform emitted it, hard wrapping included: the first version of the
+# pattern was written with literal spaces and did not match this, because terraform had
+# put a newline between "read" and "tcp". The one real failure it existed for was the one
+# it missed.
+_REAL_WINDOWS_TIMEOUT = """\
+Error: Failed to install provider
+
+Error while installing hashicorp/aws v5.100.0: releases.hashicorp.com: read
+tcp
+[2401:4900:ae2d:ed84:60:3ac8:6570:87d5]:58540->[2600:9000:264a:da00:5:e2b6:b380:93a1]:443:
+wsarecv: A connection attempt failed because the connected party did not
+properly respond after a period of time, or established connection failed
+because connected host has failed to respond.
+"""
+
 
 @pytest.mark.parametrize(
     "output",
     [
         _DIAL,
+        _REAL_WINDOWS_TIMEOUT,
         "read: connection reset by peer",
         "dial tcp: lookup registry.terraform.io: no such host",
         "TLS handshake timeout",
         "unexpected EOF",
         "received 503 Service Unavailable",
+        "Error: Failed to query available provider packages",
     ],
 )
 def test_transport_failures_are_recognised(output):

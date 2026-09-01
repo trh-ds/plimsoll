@@ -47,13 +47,34 @@ INIT_BACKOFF_SECONDS = (2.0, 6.0)
 
 # Matched against init's own output. Deliberately about transport, not about terraform:
 # every phrase here is something that happened to a socket.
+#
+# Whitespace is `\s+` rather than a literal space throughout, because terraform hard-wraps
+# its error output to the terminal width -- the message that prompted this work arrived
+# with a newline between "read" and "tcp", and a pattern written with spaces did not match
+# the one real failure it existed for.
+#
+# `wsarecv`/`wsasend` are the Windows socket layer's names for a dropped or timed-out
+# connection. Go's net package passes them through verbatim, so they are what a Windows
+# user actually sees, and a Linux-only pattern would classify every one of them as a
+# configuration error.
 _TRANSIENT_NETWORK = re.compile(
-    r"(?i)\b("
-    r"dial tcp|connection reset|connection refused|network is unreachable"
-    r"|no such host|temporary failure in name resolution|tls handshake"
-    r"|i/o timeout|timeout awaiting|unexpected eof|502 bad gateway"
-    r"|503 service unavailable|429 too many requests"
-    r")\b"
+    r"(?i)("
+    r"(?:dial|read|write)\s+tcp"
+    r"|connection\s+(?:reset|refused)"
+    r"|connection\s+attempt\s+failed"
+    r"|network\s+is\s+unreachable"
+    r"|no\s+such\s+host"
+    r"|temporary\s+failure\s+in\s+name\s+resolution"
+    r"|tls\s+handshake"
+    r"|i/o\s+timeout"
+    r"|timeout\s+awaiting"
+    r"|unexpected\s+eof"
+    r"|wsarecv|wsasend"
+    r"|failed\s+to\s+(?:query|retrieve)\s+available\s+provider\s+packages"
+    r"|502\s+bad\s+gateway"
+    r"|503\s+service\s+unavailable"
+    r"|429\s+too\s+many\s+requests"
+    r")"
 )
 
 # Copied into the throwaway working directory; everything else is left behind.
