@@ -37,7 +37,11 @@ class Finding(BaseModel):
 `also_reported_by` exists so provenance can say "Checkov and OPA both flagged this".
 Dropping the duplicate silently would lose that.
 
-`rule_class` is what deduplication and exception matching key on. `rule_id` is what gets displayed. The mapping table lives in `checks/rule_classes.yaml` and is the single place tool-specific IDs meet internal semantics.
+`rule_class` is what deduplication and exception matching key on. `rule_id` is what gets displayed. The mapping table is the single place tool-specific IDs meet internal semantics.
+
+**Revised after implementation** — the table was specified as `checks/rule_classes.yaml` and is `checks/rule_map.py`. A YAML file would have needed loading, validating, and shipping in the wheel to express a constant dictionary, and a typo in it would surface at scan time rather than at import. It carries both directions: `CHECKOV` maps a check id to a rule class and severity, and `PLIMSOLL` carries the twenty bundled rule classes with their severities and benchmark references.
+
+**Also revised** — `message` and `raw` are redacted by `Finding`'s own validator, at construction, rather than on the way into a provenance record. A finding holds a checker's verbatim message and its unmodified output, and both can contain a credential the checker found. Redacting at the serialisation boundary would leave the secret in memory and in every path that did not go through that boundary — the terminal report among them. `id` is computed from the unredacted identity fields and is unchanged by redaction, so a redacted finding still deduplicates and still matches an exception.
 
 ### Patch
 
@@ -149,29 +153,35 @@ Matching is exact on `rule_class`, glob on `resource_address`. An expired entry 
 plimsoll scan <path>       Deterministic only. No model. Fast.                    [built]
 plimsoll verify <path>     Full loop: scan, explain, fix, re-verify, attest.      [built]
 plimsoll explain <path>    Scan plus explanations, no patches.                    [built]
-plimsoll exceptions        Subcommands: list, add, expire, prune.             [not built]
+plimsoll exceptions        Subcommands: list, add, expire, prune.                 [built]
 plimsoll doctor            Report which external tools and providers are available. [built]
 ```
-
-`verify` does not yet attest — provenance is Phase 3. It scans, explains, fixes, and
-re-verifies.
 
 ### Shared flags
 
 | Flag | Default | Meaning | Status |
 |---|---|---|---|
-| `--policy-dir` | `./policies` | Additional Rego to load alongside the bundled pack | built |
+| `--policy-dir` | none | Additional Rego to load alongside the bundled pack | built |
 | `--fail-on` | `high` | Minimum severity that sets a non-zero exit | built |
-| `--format` | `terminal` | `terminal` \| `json` \| `sarif` \| `github` | `terminal` and `json` only |
-| `--provenance` | none | Path to write the JSON record | not built |
+| `--format` | `terminal` | `terminal` \| `json` \| `sarif` \| `github`, on stdout | built |
+| `--report` | none | `FORMAT=PATH`, repeatable. Several reports from one run | built |
+| `--provenance` | none | Path to write the JSON record | built |
 | `--no-llm` | false | Force deterministic mode | built |
 | `--max-retries` | 2 | Patch attempts per finding before escalation | built |
 | `--max-llm-findings` | 25 | Cap on findings sent to the model, highest severity first | built |
-| `--generated-by` | `unknown` | Recorded in provenance | not built |
-| `--timeout` | 600 | Whole-run budget in seconds | **per-check, not whole-run**; default 120 |
+| `--generated-by` | `unknown` | Recorded in provenance | built |
+| `--timeout` | 600 | Whole-run budget in seconds; a run that exceeds it exits 4 | built |
+| `--check-timeout` | 120 | Per-subprocess timeout, capped by `--timeout` | built |
 
-`--timeout` is the one flag whose current behaviour differs from this contract rather
-than being absent. Exit code 4 is unimplemented for the same reason.
+**Added after this contract was written.** `--check-timeout` did not exist: `--timeout`
+originally meant the per-subprocess value, which is a different promise. A workspace with
+four adapters and three retries per finding can sit inside every per-check timeout and
+still take twenty minutes, which in CI reads as a hang. The two are now separate flags,
+and `--timeout` means what this document always said it meant.
+
+`--report` was also added. Rendering SARIF, markdown, and JSON from one run matters
+because the gate is a `terraform init`, a plan, and an `opa eval`: three formats would
+otherwise cost three plans and could return three different answers.
 
 ### Environment
 
@@ -198,11 +208,26 @@ endpoint speaking a different wire format needs a new provider module in
 | 3 | No checks available to run — nothing was verified |
 | 4 | Run exceeded `--timeout` |
 
-Code 3 exists so a broken toolchain cannot masquerade as a clean pass. Silence must never read as success.
+Code 3 exists so a broken toolchain cannot masquerade as a clean pass. Silence must never read as success. Code 4 is checked before code 1 for the same reason: a run that timed out never exits 0, because partial verification is not verification.
 
 ## Bundled rule pack — v0.1
 
-Twenty rules covering the documented AI-generated IaC failure modes. Each is Rego evaluated against `terraform plan` JSON, each maps to a `rule_class`, and each has a fixture in `tests/fixtures/`.
+**Built.** Twenty rules covering the documented AI-generated IaC failure modes, in
+`src/plimsoll/policies/` — not a top-level `policies/`, because a bundled pack that does
+not ship in the wheel is not bundled. Each is Rego evaluated against `terraform plan`
+JSON via `opa eval`, each maps to a `rule_class` in `checks/rule_map.py`, and each has:
+
+- a case in the `*_test.rego` file beside it, run by `opa test` without terraform in the
+  loop;
+- a violation in `tests/fixtures/rules/violating/`, and the same resource fixed in
+  `tests/fixtures/rules/compliant/`. A slow test asserts that every rule class fires
+  against the first and none fires against the second.
+
+`terraform_plan` and `opa` are both built. The plan path is shared plumbing in
+`checks/terraform_cli.py`: one `init`, one `plan`, one `show` per gate run, cached on the
+`CheckContext` so two adapters cannot disagree about the flags a plan was built with.
+Plan JSON carries no file or line, so `checks/locator.py` maps a resource address back to
+one.
 
 ### IAM
 

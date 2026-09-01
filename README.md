@@ -65,22 +65,25 @@ If the model hallucinates a resource type, scopes an ARN wrong, or fixes one fin
 | Piece | State |
 |---|---|
 | The gate — adapter protocol, registry, availability probing, crash isolation | **Built** |
-| `terraform_validate` and `checkov` adapters | **Built** |
+| All four adapters — `terraform_validate`, `terraform_plan`, `checkov`, `opa` | **Built** |
+| Bundled rule pack — 20 Rego rules, with `opa test` cases and a fixture corpus | **Built** |
 | Core models — `Finding`, `Patch`, `Decision`, `GateResult`, config | **Built** |
 | Cross-tool deduplication | **Built** |
 | The reasoning loop and patch re-verification | **Built** |
 | Model providers — `openai_compat`, `null` | **Built** |
-| Secret redaction on the prompt path | **Built** |
-| `plimsoll scan`, `verify`, `explain`, `doctor`; terminal and JSON output | **Built** |
-| `opa` and `terraform_plan` adapters | Next |
-| Bundled rule pack (20 Rego rules) | Not started |
-| Exception store, `plimsoll exceptions` | Not started |
-| Provenance records | Not started |
-| SARIF output, GitHub Action, PR comments | Not started |
-| Published benchmark numbers | Not started |
+| Secret redaction, on every path a finding takes | **Built** |
+| Exception store, `plimsoll exceptions list \| add \| expire \| prune` | **Built** |
+| Provenance records, `--provenance`, published JSON Schema | **Built** |
+| Whole-run timeout and exit code 4 | **Built** |
+| Terminal, JSON, SARIF, and PR-comment output | **Built** |
+| GitHub Action | **Built**, unreleased |
+| Benchmark harness and scenario set | **Built** |
+| Published benchmark numbers | **Not measured** |
 
-The loop works. What it does not yet have is much to reason *about*: the bundled Rego
-pack is unwritten, so findings come from `checkov` and `terraform validate` only.
+The last row is the one that matters. The harness is written and tested; no run has
+happened, so there is no pass-rate figure here and there will not be one until
+[`benchmarks/RESULTS.md`](benchmarks/RESULTS.md) has real rows in it. A tool that quotes a
+number it has not measured is the thing this project exists to argue against.
 
 Phase by phase, that is [`implementation_plan.md`](implementation_plan.md); what changed
 when is [`CHANGELOG.md`](CHANGELOG.md); the running log with the surprises in it is
@@ -99,21 +102,40 @@ plimsoll scan ./infra
 export PLIMSOLL_LLM_BASE_URL=https://your-router.example/v1
 export PLIMSOLL_LLM_MODEL=your-model-id
 export PLIMSOLL_LLM_API_KEY=...
-plimsoll verify ./infra
+plimsoll verify ./infra --provenance run.json
+
+# several reports from one run, rather than one run per format
+plimsoll scan ./infra --report sarif=plimsoll.sarif --report github=comment.md
 ```
 
-`--provenance` is not implemented yet.
-
-As a GitHub Action:
+As a GitHub Action. The model is configured with the same three environment variables, so
+a `scan` needs none of them:
 
 ```yaml
-- uses: trh-ds/plimsoll-action@v0
-  with:
-    path: ./infra
-    policy-dir: ./policies
-    fail-on: high
-    llm-provider: github-models
+permissions:
+  contents: read
+  pull-requests: write   # only for pr-comment
+  security-events: write # only for the code-scanning upload
+
+steps:
+  - uses: actions/checkout@v4
+  - uses: trh-ds/plimsoll@v0
+    id: plimsoll
+    with:
+      path: ./infra
+      fail-on: high
+      pr-comment: "true"
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+  - uses: github/codeql-action/upload-sarif@v3
+    if: always()
+    with:
+      sarif_file: ${{ steps.plimsoll.outputs.sarif-report }}
 ```
+
+Set `command: verify` and the three `PLIMSOLL_LLM_*` variables in the step's `env:` to
+run the full loop. Every input mirrors a CLI flag and is named after it; the full list is
+in [`action.yml`](action.yml). The image is built on the runner, so the first run of a job
+is a few minutes slower than the rest.
 
 Plimsoll is meant to run against Copilot, Claude, Cursor, or human-written Terraform alike, and to work with the OPA and Checkov policies you already have.
 
@@ -127,8 +149,17 @@ uv sync
 uv run plimsoll doctor                            # which tools and which model
 uv run plimsoll scan tests/fixtures/insecure_s3   # exit 1: findings at or above HIGH
 uv run plimsoll scan tests/fixtures/compliant_s3  # exit 0
-uv run pytest                                     # needs no terraform, checkov, or opa
+uv run pytest -m "not slow"                       # needs no terraform, checkov, or opa
 ```
+
+`doctor` will tell you which of `terraform`, `opa`, and `checkov` it can find. None of
+them is required — a missing one is reported and skipped, and the report says which checks
+ran — but with none of them installed there is nothing to verify, and `scan` exits 3
+rather than pretending the configuration passed.
+
+The rule pack needs `terraform` and `opa`. A cold `terraform init` downloads the AWS
+provider, which on a slow connection can take longer than the 120-second default; raise
+`--check-timeout` if you see an init timeout.
 
 The scan is deterministic and needs no model. `verify` adds the loop:
 
@@ -144,12 +175,21 @@ uv run plimsoll explain tests/fixtures/insecure_s3   # prose only, no patches
 `verify` never writes to your workspace. Patches are applied to a temporary copy and
 re-run through the same checks; only fixes that pass are printed.
 
-Shared flags: `--fail-on`, `--format terminal|json`, `--policy-dir`, `--timeout`. `verify`
-adds `--no-llm`, `--max-retries`, and `--max-llm-findings`.
+Shared flags: `--fail-on`, `--format terminal|json|sarif|github`, `--report FORMAT=PATH`,
+`--policy-dir`, `--provenance`, `--generated-by`, `--timeout` (whole run, 600s) and
+`--check-timeout` (one subprocess, 120s). `verify` adds `--no-llm`, `--max-retries`, and
+`--max-llm-findings`.
+
+Accepted violations go in `.plimsoll/exceptions.yaml`, managed with
+`plimsoll exceptions list | add | expire | prune`. A matched, live exception is never sent
+to a model — it does not cost a token and does not leave the machine. An expired one is
+reported as lapsed rather than silently re-raised.
 
 Exit codes: **0** clean, **1** findings at or above `--fail-on` remain, **2** config
-error, **3** no check could run. With no checker installed it exits 3 and says nothing
-was verified, rather than reporting a clean pass.
+error, **3** no check could run, **4** the run exceeded `--timeout`. With no checker
+installed it exits 3 and says nothing was verified, rather than reporting a clean pass;
+a run that timed out exits 4 and never exits 0, because partial verification is not
+verification.
 
 ## Design commitments
 
@@ -158,22 +198,33 @@ These are the properties the project exists to have. They are enforced as
 
 - **Model-agnostic.** Any OpenAI-compatible endpoint: an agent router, GitHub Models, Groq, vLLM, LM Studio, or a local Ollama if you want one. Three environment variables, no code change.
 - **No GPU required.** Inference is hosted by default. Requiring a local model would make the project unusable on the average laptop, and a contributor who cannot run the tool cannot contribute to it. Free-tier hosted endpoints keep the zero-cost path open without the hardware.
-- **Nothing leaves without redaction.** Prompts carry your Terraform to a third party, so every prompt passes through one audited choke point that strips credential-shaped values first. Redaction is reversible, so a patch never overwrites a real secret with a placeholder.
+- **Nothing leaves without redaction.** Prompts carry your Terraform to a third party, so every prompt passes through one audited choke point that strips credential-shaped values first. Redaction is reversible, so a patch never overwrites a real secret with a placeholder — and findings themselves are redacted at construction, so a credential a scanner echoed back cannot reach a report either.
 - **Degrades safely.** With `--no-llm`, or when the provider is unreachable or unconfigured, Plimsoll is a working policy scanner. It never fails open.
 - **Never applies.** `terraform apply` is not called anywhere in this codebase. This is a pre-deployment tool.
-- **Never edits your repo.** `verify` copies the workspace, patches the copy, and reports. Your files are not touched.
-- **Remembers exceptions.** A finding accepted in a previous PR is not re-raised. Alert fatigue is the main reason policy-as-code gets switched off. *(Not built yet.)*
+- **Never edits your repo.** `verify` copies the workspace, patches the copy, and reports. Your files are not touched — including when terraform needs a `.terraform/` directory, which it gets in a throwaway copy.
+- **Remembers exceptions.** A finding accepted in a previous PR is not re-raised. Alert fatigue is the main reason policy-as-code gets switched off. Accepted findings are resolved before any model is consulted, so they cost no tokens and never leave the machine.
 
 ## Benchmarks
 
-*Planned, not yet published.* `benchmarks/` will reproduce IaC-Eval against current
-models and measure the delta Plimsoll's loop produces, with method, model versions,
-dataset commit, and token counts alongside. Reproducing it is meant to be possible on a
-free-tier hosted endpoint and an ordinary laptop — no GPU, no paid inference — and that
-claim is the whole point of publishing the harness rather than only the numbers.
+**The harness is built. Nothing has been measured.**
 
-Until those numbers exist, treat every effectiveness claim in this README as a design
-intention rather than a measurement.
+`benchmarks/runner.py` prompts a model per scenario, scores the raw Terraform with the
+gate, then runs the full loop over the same output and scores it again. Both halves in one
+pass, both judged by the same gate. It reports baseline pass rate, post-loop pass rate,
+the delta, mean patch attempts per finding, and escalation rate, alongside model versions,
+tool versions, the scenario set's digest and commit, and usage.
+
+It needs a free-tier hosted endpoint and about ten minutes. No GPU, no paid inference —
+that claim is the reason the harness is published and not only the numbers.
+
+[`benchmarks/BASELINE.md`](benchmarks/BASELINE.md) and
+[`benchmarks/RESULTS.md`](benchmarks/RESULTS.md) are stubs with their method fixed and
+their tables empty, and [`RESULTS.md`](benchmarks/RESULTS.md) lists the reasons the
+eventual number might be weak — written down before it exists, so it cannot be chosen to
+avoid them.
+
+Until those tables have rows, **treat every effectiveness claim in this README as a design
+intention rather than a measurement.** There is no pass rate here on purpose.
 
 ## Contributing
 

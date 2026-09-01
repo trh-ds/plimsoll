@@ -3,13 +3,17 @@
 Thanks for looking. This project is designed to be contributed to in two specific
 shapes, and both are self-contained enough to finish in an evening.
 
-> **Current state: pre-alpha.** Phase 1 of `implementation_plan.md` is most of the way
-> done and Phase 2 is built: the models, the gate, two adapters (`terraform_validate` and
-> `checkov`), deduplication, the reasoning loop with patch re-verification, secret
-> redaction, and `plimsoll scan` / `verify` / `explain` / `doctor` all exist. The bundled
-> rule pack, the exception store, and provenance records do not. If you want to add an
-> adapter, the interface it plugs into is real and tested; if you want to add a rule, the
-> Rego harness does not exist yet, so open an issue first and we will sequence it.
+> **Current state: pre-alpha, but the interfaces are real.** Phases 1 through 4 of
+> `implementation_plan.md` are built: all four adapters, the twenty-rule Rego pack, the
+> reasoning loop with patch re-verification, the exception store, provenance records,
+> four reporters, and the GitHub Action. Adding an adapter or a rule are both worked
+> paths with fixtures and tests behind them.
+>
+> What is **not** done is the part that would tell anyone whether it works. The benchmark
+> harness is built and has never been run, so there is no measured pass rate anywhere in
+> this repository — and there must not be one until there is. Running it is the single
+> most valuable thing anyone could contribute right now; see
+> [`benchmarks/README.md`](benchmarks/README.md).
 
 > **You do not need a GPU, a local model, or an AWS account.** Inference is hosted — any
 > OpenAI-compatible endpoint, including free tiers — and the whole test suite runs with
@@ -24,7 +28,8 @@ shapes, and both are self-contained enough to finish in an evening.
 | Contribution | Effort | Where |
 |---|---|---|
 | **A new check adapter** — Trivy, KICS, or anything with structured output | One module, one test, one fixture | `src/plimsoll/checks/` |
-| **A policy rule** for the bundled Rego pack | One rule, two fixtures, one mapping | `policies/` *(not yet created)* |
+| **A policy rule** for the bundled Rego pack | One rule, one `opa test` case, two fixtures, one mapping | `src/plimsoll/policies/` |
+| **A benchmark run** against a free-tier endpoint | Ten minutes and an API key | `benchmarks/` |
 | **A model provider** for an endpoint that is not OpenAI-compatible | One module, one test | `src/plimsoll/llm/` |
 | **A secret pattern** redaction currently misses | One regex, one test | `core/redaction.py` |
 | A bug report with a reproducing Terraform fixture | Small | Issues |
@@ -163,9 +168,11 @@ Rules for the shell-out:
 - Add the tool's severity vocabulary to `src/plimsoll/checks/severity_map.py` as an
   explicit table. **Never infer severity**, and never map an unrecognised value to
   `INFO` — an unknown severity should stay visible, not get buried.
-- Map the tool's rule IDs to internal `rule_class` values in `checks/rule_classes.yaml`
-  *(created with the second adapter)*. `rule_class` is what deduplication and exception
-  matching key on; `rule_id` is what gets displayed.
+- Map the tool's rule IDs to internal `rule_class` values in
+  `src/plimsoll/checks/rule_map.py`. `rule_class` is what deduplication and exception
+  matching key on; `rule_id` is what gets displayed. Map only the IDs you have verified
+  against real output from the tool — an unmapped check is reported unclassified and below
+  the default threshold, which is the right failure. A guessed mapping is not.
 
 ### 5. Test it
 
@@ -203,15 +210,36 @@ reference. The rules that matter:
 
 ## Walkthrough: add a policy rule
 
-Not yet possible — `policies/` and the Rego evaluation path land with the `opa` adapter.
-The shape each rule will need is already fixed in `specifications.md`:
+The pack is in `src/plimsoll/policies/`, grouped by area — `iam`, `s3`, `network`,
+`datastore`, `hygiene` — on a shared `lib`. Five steps, none of them large. There is a
+worked example with code in
+[`ONBOARDING.md`](ONBOARDING.md#walkthrough-add-a-rule-to-the-pack).
 
-- a Rego implementation evaluated against `terraform plan` JSON,
-- a violating fixture and a compliant fixture,
-- a `rule_class` and a `benchmark_refs` mapping,
-- a remediation hint.
+1. **Write the rule** as a `findings contains f if { ... }` block in the right group. It
+   reads `terraform plan` JSON: `planned_values` answers "is this attribute dangerous",
+   `configuration` answers "does anything point at this bucket" and holds literals that
+   never survive into a plan. `lib.rego` explains the difference at the top.
+2. **Classify it** in `checks/rule_map.py` — `rule_class`, severity, and any
+   `benchmark_refs`. **A rule never carries its own severity.** A severity a rule author
+   can raise alone is a severity nobody reviews.
+3. **Unit-test it** in the `*_test.rego` beside it, with a small hand-built plan document.
+   `opa check --strict src/plimsoll/policies && opa test src/plimsoll/policies` runs in
+   about a second, so you can iterate without terraform in the loop. Test the negative
+   case as hard as the positive one.
+4. **Add it to the corpus** — a violation in `tests/fixtures/rules/violating/` and the
+   *same resource, fixed* in `tests/fixtures/rules/compliant/`. `tests/test_rule_corpus.py`
+   then asserts your rule fires against the first and that nothing fires against the
+   second.
+5. **Run it end to end** with `uv run pytest -m slow` and a scan of both corpora.
 
-If you want to write one now, open an issue and we will get the harness in ahead of it.
+Two rules about rules:
+
+- **A hand-built input is fine in `*_test.rego` and never in `tests/fixtures/`.** The
+  first asserts what a rule does with a shape; the second asserts what shape a tool
+  actually emits, and only the second can be got wrong by writing it from documentation.
+- **Never widen a rule to make the compliant corpus pass.** Fix the rule or fix the
+  fixture. A rule that fires is easy to write; a rule that fires only when it should is
+  the one a team leaves switched on.
 
 ## Testing conventions
 

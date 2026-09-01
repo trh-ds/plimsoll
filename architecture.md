@@ -75,8 +75,15 @@ class Check(Protocol):
     name: str
 
     def is_available(self) -> ToolAvailability: ...
-    def run(self, workspace: Path, config: CheckConfig) -> list[Finding]: ...
+    def run(self, ctx: CheckContext) -> list[Finding]: ...
 ```
+
+**Revised after implementation** — `run` takes a `CheckContext` rather than a path and a
+config. Two adapters need the same `terraform plan` output, and passing loose arguments
+meant either computing the plan twice or letting the two disagree about the flags it was
+built with. The context carries the workspace, the config, a scratch directory, the run
+deadline, and a `once()` cache, so every shared artifact is produced at most once per gate
+run no matter how many adapters ask for it.
 
 Each adapter shells out to one external binary, parses structured output, and maps it into `Finding`. Four in v0.1:
 
@@ -90,6 +97,58 @@ Each adapter shells out to one external binary, parses structured output, and ma
 Adding a fifth (Trivy, KICS) is one file plus one fixture. This is deliberate — it is the contribution shape the project wants.
 
 **A missing binary is not an error.** `is_available()` returns false, the run continues, and the report states which checks were skipped. A user without Terraform installed still gets Checkov results.
+
+A binary that is installed but had nothing to evaluate is a third state, distinct from
+both. `opa` with no plan to work on did not fail — it never started, and it is recorded as
+skipped rather than as a failure. A run where only skipped adapters were present still
+exits 3.
+
+#### The plan path (`checks/terraform_cli.py`)
+
+`terraform plan` is what makes the rule pack possible and is also the only part of the
+gate that needs an AWS account it will not be given. Four decisions hold it together:
+
+**The workspace is never written to.** `terraform init` writes `.terraform/` and
+`.terraform.lock.hcl` into its working directory. Plimsoll reports; it does not edit your
+repository, and that promise has no exception for "but terraform needs it". So when the
+workspace is not already initialised, terraform runs against a throwaway copy in the
+run's scratch directory. When it *is* already initialised, and no injected file is
+needed, it runs in place — the user did the work, and re-doing it in a copy would
+re-download hundreds of megabytes to reach the same answer.
+
+**Placeholder credentials, only where none are set.** `terraform plan` with
+`-refresh=false` on resources that do not exist yet needs credentials to be *present*,
+not valid. If the caller already has real ones — an access key, a profile, a container
+role, a web identity token — they are used untouched. A CI job under a read-only role
+produces a more accurate plan than any placeholder, and this tool has no business
+silently swapping out a caller's identity.
+
+**A provider override file, because placeholders alone are not enough.** The AWS provider
+calls `sts:GetCallerIdentity` before it will plan anything, and with placeholder
+credentials that returns `InvalidClientTokenId` and the whole plan fails — which would be
+reported as a finding about your configuration when it is really a fact about this
+machine having no AWS account. So `plimsoll_provider_override.tf` is written into the
+throwaway copy, setting `skip_credentials_validation`, `skip_requesting_account_id`, and
+`skip_region_validation`. Those three turn off checks about *the caller*. None of them
+changes how any resource is planned, which is the only thing the rule pack reads.
+
+It is written only when both conditions hold: no real credentials, and a default
+`provider "aws"` block exists to merge into. Terraform's override files merge into an
+existing block and error when there is none, so an aliased-only configuration gets the
+honest plan failure instead of a broken one.
+
+**For configurations that genuinely reach the API at plan time** — a `data` source
+reading a real AMI or a hosted zone is the common case — none of the above helps, because
+the call has to succeed rather than be skipped. Point the provider at
+[LocalStack](https://localstack.cloud) with a `custom_endpoints` override and real-looking
+test credentials, or run the job under a read-only role. Plimsoll needs no configuration
+for either: `has_real_credentials()` sees the credentials and steps out of the way.
+
+Provider downloads are cached in `TF_PLUGIN_CACHE_DIR` across runs, because the verifier
+re-runs the gate once per patch attempt and each attempt would otherwise re-download the
+provider. `init` is retried up to three times with backoff, but only when the failure
+names a transport problem: a malformed `required_providers` block fails identically every
+time, and retrying it spends the run budget three times over to print the same message.
 
 ### ExceptionStore (`core/exceptions.py`)
 
@@ -153,6 +212,19 @@ Builds one record per run containing run metadata, tool versions, model and prov
 Schema is versioned from day one and designed so a `signature` block can be added without breaking consumers. Sigstore keyless signing is v0.2; shipping the schema without it now is fine, shipping a schema that cannot accommodate it is not.
 
 Secret redaction runs before serialisation. Provenance records get committed to repos and attached to PRs — a leaked credential in a "corrected value" field would be a serious own goal.
+
+**Revised after implementation** — redaction moved earlier for findings. `Finding.message`
+and `Finding.raw` are redacted by the model's own validator, at construction, not at the
+serialisation boundary. A finding carries a checker's verbatim message and its unmodified
+output, and either can contain a credential the checker found; redacting only on the way
+into provenance would leave the secret in memory and on every other path, the terminal
+report included. `Finding.id` is computed from the unredacted identity fields, so a
+redacted finding still deduplicates and still matches an exception.
+
+`Patch.new_content` is the one thing that does not enter a record at all. It is the whole
+corrected file with secrets *restored* — that is what a patch has to be to be applied —
+so it is excluded rather than redacted, and only `Patch.diff` is carried, through
+`redact()`.
 
 ### Reporters (`reporters/`)
 

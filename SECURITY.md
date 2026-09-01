@@ -63,8 +63,8 @@ rule, in which case it is the last item above.
 Things Plimsoll deliberately does not do, which bound what can go wrong:
 
 - **No cloud credentials and no cloud SDK.** It reads HCL and shells out to CLIs. It
-  never authenticates to AWS. `terraform plan`, when it lands, runs against dummy
-  credentials or LocalStack.
+  never authenticates to AWS. `terraform plan` runs against placeholder credentials, or
+  LocalStack, or whatever credentials you already had — see below.
 - **`terraform apply` is never invoked.** Not in code, not in tests, not in fixtures.
   Plimsoll cannot create, modify, or destroy a cloud resource.
 - **No backend, no database, no dashboard.** Nothing is uploaded to us. Output is
@@ -77,6 +77,43 @@ Things Plimsoll deliberately does not do, which bound what can go wrong:
   directory, applies the patch there, and reports. Your files are not modified.
 - **Unit tests make no network calls**, loopback included. Provider behaviour is tested
   against recorded responses with no socket opened.
+
+### The provider override file
+
+To produce a plan, Plimsoll may write one file — `plimsoll_provider_override.tf` — into a
+**throwaway copy** of your configuration in the run's scratch directory. It is never
+written to your repository, and the copy is deleted when the run ends.
+
+It contains three arguments and nothing else:
+
+```hcl
+provider "aws" {
+  skip_credentials_validation = true
+  skip_requesting_account_id  = true
+  skip_region_validation      = true
+}
+```
+
+It exists because the AWS provider calls `sts:GetCallerIdentity` before it will plan
+anything. With placeholder credentials that returns `InvalidClientTokenId` and the plan
+fails, which would be reported as a problem with your configuration when it is a fact
+about the machine having no AWS account. All three arguments relax checks about *the
+caller*; none of them changes how any resource is planned, which is the only thing the
+rule pack reads.
+
+Two conditions must both hold before it is written:
+
+- **No real credentials are present.** If `AWS_ACCESS_KEY_ID`, `AWS_PROFILE`,
+  `AWS_CONTAINER_CREDENTIALS_RELATIVE_URI`, or `AWS_WEB_IDENTITY_TOKEN_FILE` is set, your
+  identity is used exactly as it stands and nothing is injected. A CI job under a
+  read-only role produces a more accurate plan than any placeholder, and this tool has no
+  business silently swapping out a caller's identity.
+- **A default `provider "aws"` block exists to merge into.** An aliased-only setup is not
+  overridable, and gets the honest plan failure rather than a broken one.
+
+The placeholder credentials themselves are inert strings (`AKIAPLIMSOLLDUMMYKEY0` and a
+literal that says it is not a secret). They are set only where nothing was set already,
+and they never reach a provenance record, a prompt, or a report.
 
 ### What leaves your machine when you run `verify`
 
@@ -104,9 +141,17 @@ shape none of those patterns match will be transmitted. If that is unacceptable 
 given repository, `plimsoll scan` and `plimsoll verify --no-llm` do useful work without
 sending anything anywhere.
 
-A gap worth naming: `Finding.raw` retains the source snippet an adapter reported, and is
-not yet redacted on the reporting path. It is redacted on the prompt path. Closing that
-is part of the provenance work.
+**That gap is closed.** `Finding.message` and `Finding.raw` used to be redacted on the
+prompt path only, so a credential an adapter had echoed back could still reach a terminal
+report or a JSON file. Both are now redacted by `Finding`'s own validator, at
+construction — there is no path on which an unredacted one exists, because one cannot be
+built. `Finding.id` is derived from the unredacted identity fields, so redaction does not
+change what deduplicates or what an exception matches.
+
+`Patch.new_content` is the deliberate exception. It is the whole corrected file with
+secrets *restored*, which is what it has to be in order to be applied, and it is excluded
+from provenance records entirely rather than redacted. Only `Patch.diff` is recorded, and
+it goes through `redact()` first.
 
 ## Dependencies
 

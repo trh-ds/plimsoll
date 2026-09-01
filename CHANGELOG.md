@@ -71,6 +71,60 @@ for what is a contract and what is not.
 - **`plimsoll verify` and `plimsoll explain`**, with `--no-llm`, `--max-retries`, and
   `--max-llm-findings`. `doctor` now reports the model provider alongside the check
   binaries, without contacting it.
+- **`terraform_plan` adapter and the shared terraform plumbing**
+  (`checks/terraform_plan.py`, `checks/terraform_cli.py`) — one `init`, `plan`, and
+  `show` per gate run, cached on the `CheckContext` so `validate` and `plan` cannot
+  disagree about the same files. The workspace is never written to: when it is not
+  already initialised, terraform runs against a throwaway copy. Provider downloads are
+  cached across runs, which matters because the verifier re-runs the gate once per patch
+  attempt.
+- **A provider override for machines with no AWS account.** The AWS provider calls
+  `sts:GetCallerIdentity` before it will plan, so placeholder credentials alone produce
+  `InvalidClientTokenId` and a failed plan that reads as a broken configuration. A
+  `plimsoll_provider_override.tf` is written into the throwaway copy — never into your
+  repository — and only when no real credentials are present and a default
+  `provider "aws"` block exists to merge into.
+- **`opa` adapter** (`checks/opa.py`) — evaluates the bundled Rego pack and any
+  `--policy-dir` against the plan JSON.
+- **The bundled rule pack** (`src/plimsoll/policies/`) — twenty rules across `iam`, `s3`,
+  `network`, `datastore`, and `hygiene`, on a shared `lib`. Every rule has an `opa test`
+  case beside it and a fixture in `tests/fixtures/rules/`, and a slow test asserts that
+  every rule class fires against the violating corpus and none fires against the fixed
+  one.
+- **`checks/locator.py`** — resource address to file and line. Plan JSON carries neither.
+- **`core/deadline.py` and the whole-run budget.** `--timeout` is now the run budget
+  (default 600) and `--check-timeout` is the per-subprocess one (default 120). The
+  deadline is checked between adapters, between findings, and between patch attempts, and
+  caps each subprocess timeout so an adapter cannot outrun the budget it was admitted
+  under. A run that exceeds it exits **4** and never exits 0.
+- **Exception store** (`core/exceptions.py`) and `plimsoll exceptions list | add | expire
+  | prune`. Matching is exact on `rule_class` and glob on `resource_address`. A matched,
+  live exception is resolved before any model is consulted, so an accepted violation costs
+  no tokens and does not leave the machine. An expired one does not exempt: it is attached
+  to the decision and reported as lapsed.
+- **Provenance records** (`core/provenance.py`), `--provenance PATH`, `--generated-by`,
+  and a published `schemas/provenance-0.1.json` with a test that fails when the committed
+  schema drifts from the model. Canonical JSON, sorted keys, `content_hash` computed over
+  everything but itself and the reserved `signature` block.
+- **SARIF 2.1.0 and GitHub PR comment reporters** (`reporters/sarif.py`,
+  `reporters/github.py`), and `--format sarif|github`. SARIF carries skipped and failed
+  checks in `invocations[].toolExecutionNotifications`, because code scanning shows
+  results and nothing else, and silence there would read as success.
+- **`--report FORMAT=PATH`**, repeatable. Several reports from one gate run: SARIF for
+  code scanning, markdown for the pull request, JSON for a CI job's own outputs. The gate
+  is an `init`, a plan, and an `opa eval`, so three formats would otherwise cost three
+  plans and could return three different answers.
+- **GitHub Action** — `action.yml` at the repository root, with `action/Dockerfile`,
+  `action/entrypoint.sh`, and `action/post_comment.py`. Pinned terraform, opa, and
+  checkov; one gate run; the CLI's exit code passed through untranslated; and a pull
+  request comment that edits the previous one in place rather than adding another.
+- **Benchmark harness** (`benchmarks/`) — `runner.py`, a twelve-scenario set covering all
+  twenty rule classes, and stub `BASELINE.md` and `RESULTS.md`. It scores the raw model
+  output and the post-loop output in one pass, with the gate deciding both.
+- **`integration.yml` and `publish.yml`** — the first installs the real binaries and runs
+  the slow tests, `opa test`, a SARIF schema validation, and Plimsoll against its own
+  corpus; the second publishes to PyPI on tag via trusted publishing, with no stored
+  token.
 
 ### Fixed
 
@@ -80,6 +134,23 @@ for what is a contract and what is not.
   mapped that to a HIGH finding, which made a check that verified nothing look like one
   that ran and found a single problem. It now raises, so the run reports that nothing was
   verified.
+- **`iam.resource.wildcard` no longer reads as nonsense when the action is `"*"`.** The
+  message said "`*` can be scoped to an ARN", which says nothing.
+- **A false positive in `datastore.rego`**, found by the compliant fixture corpus: the AWS
+  provider types `encrypted` as a string on a launch template's block device, so plan JSON
+  carries `"true"` rather than `true`, and every encrypted launch template was reported as
+  unencrypted.
+- **`terraform init` retries a dropped registry connection**, three times with backoff,
+  and only when the output names a transport failure — a malformed `required_providers`
+  block fails identically every time, so retrying it spends the budget three times to
+  print the same message. The backoff never sleeps past the run deadline. The two failures
+  used to print the same sentence and mean opposite things; they are now told apart, and
+  an init timeout names the two knobs that fix it rather than sending the reader to look
+  at their Terraform.
+- **The SARIF `$schema` URL resolved to a 404.** It pointed into a branch layout the
+  sarif-spec repository has since rearranged, so every record named a schema no validator
+  could fetch. It is now the OASIS errata URL, and the integration workflow validates
+  against the same constant.
 
 ### Changed
 
@@ -110,10 +181,24 @@ for what is a contract and what is not.
 - **`terraform validate` fixtures are captured from real runs**, terraform 1.15.8 with
   `hashicorp/aws ~> 5.0`, replacing fixtures reconstructed from the documented schema.
 - **`Check.run` now takes a `CheckContext`** instead of `(workspace, config)`. The context
-  carries the workspace, the config, and a memoized `plan_json()` so adapters that
-  evaluate rules against `terraform plan` output can share one plan rather than each
-  producing their own. Breaking for anyone who wrote an adapter against the old
-  signature, which is the point of doing it while there is one adapter.
+  carries the workspace, the config, a scratch directory, the run deadline, and a `once()`
+  cache so adapters that evaluate rules against `terraform plan` output share one plan
+  rather than each producing their own. Breaking for anyone who wrote an adapter against
+  the old signature, which is the point of doing it while there is one adapter.
+- **`Finding.message` and `Finding.raw` are redacted at construction**, by the model's own
+  validator, rather than on the way into a provenance record. A finding carries a
+  checker's verbatim message and its unmodified output, and either can contain a
+  credential the checker found; redacting only at the serialisation boundary left the
+  secret in memory and on every other path, the terminal report included. `Finding.id` is
+  derived from the unredacted identity fields, so redaction changes neither deduplication
+  nor exception matching.
+- **The rule-class mapping is `checks/rule_map.py`, not `checks/rule_classes.yaml`.** A
+  YAML file would need loading, validating, and shipping in the wheel to express a
+  constant dictionary, and a typo in it would surface at scan time rather than at import.
+- **The rule pack lives at `src/plimsoll/policies/`**, not a top-level `policies/`. A
+  bundled pack that does not ship in the wheel is not bundled.
+- **Third-party GitHub Actions are pinned to commit SHAs** and workflows declare
+  `permissions: contents: read`.
 - Renamed the project from Bulwark to Plimsoll throughout, including the `PLIMSOLL_*`
   environment variables and the `.plimsoll/` exception store path.
 - Replaced tfsec and Terrascan with Trivy and KICS wherever the documentation named a
@@ -122,31 +207,32 @@ for what is a contract and what is not.
 
 ### Known gaps
 
-- `exceptions` does not exist. It needs the exception store, so it is absent rather than
-  stubbed. `verify` does not yet attest — `--provenance` is unimplemented.
-- **The loop has little to reason about yet.** The bundled Rego pack is unwritten, so
-  findings come only from `checkov` and `terraform validate`. The loop is built and
-  tested; its real-world fix rate is unmeasured, and will stay unmeasured until there are
-  rules and a benchmark harness.
+- **There are no published numbers.** The benchmark harness is built and tested and no run
+  has happened, so `benchmarks/BASELINE.md` and `benchmarks/RESULTS.md` are stubs. Nothing
+  anywhere in this repository may quote a pass rate until they have rows. This is the
+  largest gap and the one most worth reading first.
 - **No provider has been exercised against a live endpoint in this repository's history.**
   Request construction, response parsing, and every failure path are tested against
   recorded payloads with no socket opened, per the no-network-in-unit-tests rule. That is
   not the same as having talked to a real router.
+- **The GitHub Action's image has never been built.** Docker was unavailable on the
+  machine it was written on. The wiring is asserted by `tests/test_action.py` and the
+  image is built and driven by the `action-image` job in `integration.yml`, which will be
+  the first thing to have run it.
 - Redaction is pattern-based, so it is a mitigation and not a guarantee. A credential in
   a shape none of the patterns match will be transmitted.
-- `Finding.raw` retains the source snippet an adapter reported and is not redacted on the
-  reporting path, only on the prompt path.
-- Two of the four v0.1 adapters exist. `opa` and `terraform_plan` are next.
-- No plan provider is wired into `default_gate()` yet, so `ctx.plan_json()` is always
-  `None` until the `terraform_plan` adapter lands.
-- `--timeout` is per-check, not the whole-run budget `specifications.md` describes, and
-  exit code 4 is not implemented.
 - `rule_map.py` covers only the checkov IDs verified against real output. Everything else
   is reported unclassified, at a severity below the default threshold.
-- `terraform_validate` needs the workspace initialized. It reports that it could not run
-  rather than guessing, but nothing initializes the workspace for you yet.
-- The bundled rule pack, the exception store, and provenance records do not exist. They
-  are the remainder of Phase 1 and all of Phase 3 in
-  [`implementation_plan.md`](implementation_plan.md).
+- **The twenty rule classes and their severities encode security judgement** and have not
+  been reviewed by a second person. They are the thing a user is trusting.
+- **`verify` re-initialises terraform once per patch attempt.** `TF_PLUGIN_CACHE_DIR`
+  keeps that to a local copy rather than a download, so it is a cost and not a bug. The
+  upgrade is a `TF_DATA_DIR` shared across runs and keyed by the workspace's provider
+  requirements; measure before building it.
+- **Benchmark token counts are estimates.** `LLMProvider.complete` returns text and does
+  not carry the chat-completions `usage` block. The harness counts characters exactly and
+  publishes `estimated_tokens` as characters/4, labelled as an estimate.
+- **Plimsoll is not on PyPI**, so `uv tool install plimsoll` does not work yet. The
+  publish workflow is ready; the name has not been reserved.
 
 [Unreleased]: https://github.com/trh-ds/plimsoll/commits/main

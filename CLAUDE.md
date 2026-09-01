@@ -28,24 +28,36 @@ These are not style preferences. Breaking one of them breaks the project's reaso
 
 ```
 src/plimsoll/
-  checks/         Check adapters (terraform_validate, checkov; terraform_plan and opa next)
+  checks/         Check adapters: terraform_validate, terraform_plan, checkov, opa
+    terraform_cli.py  Shared init/plan/show plumbing, plugin cache, provider override
+    locator.py    Resource address -> file and line; plan JSON carries neither
+    rule_map.py   Checkov id -> rule_class, and the twenty PLIMSOLL rule classes
   llm/            LLMProvider implementations (openai_compat, null) + prompts/*.txt
   core/
     models.py     Pydantic schemas — Finding, Patch, Decision, ProvenanceRecord
     gate.py       Runs checks, aggregates findings
+    deadline.py   The monotonic run budget behind --timeout and exit code 4
     context.py    Builds every prompt; the single redacted egress point
     verifier.py   Applies a patch to a scratch copy and re-runs the gate
     loop.py       The verify -> reason -> re-verify -> escalate loop
     redaction.py  Secret patterns, one-way and reversible
-    exceptions.py ExceptionStore (not built)
-    provenance.py Record construction and hashing (not built)
-  reporters/      terminal, json_report; github_pr and sarif not built
+    exceptions.py ExceptionStore
+    provenance.py Record construction and hashing
+  policies/       The bundled Rego pack: lib, iam, s3, network, datastore, hygiene,
+                  plus *_test.rego run by `opa test` and excluded from the wheel
+  reporters/      terminal, json_report, sarif, github
   cli.py          Typer entrypoint
-policies/         Bundled Rego rules (not created)
+action/           Dockerfile, entrypoint.sh, post_comment.py for the GitHub Action
+action.yml        The Action's metadata; at the root because a container action's
+                  build context is the directory holding it
+benchmarks/       runner.py, scenarios.yaml, BASELINE.md, RESULTS.md
+schemas/          Published JSON Schema for the provenance record
 tests/
-  fixtures/       Terraform configs with known violations
-action/           Dockerfile + action.yml for the GitHub Action (not created)
+  fixtures/       Terraform configs with known violations, and recorded tool output
 ```
+
+The rule pack lives at `src/plimsoll/policies/`, not a top-level `policies/`. A bundled
+pack that does not ship in the wheel is not bundled.
 
 ## Commands
 
@@ -60,7 +72,15 @@ uv run plimsoll doctor                              # which external tools and w
 uv run plimsoll scan ./tests/fixtures/insecure_s3   # manual smoke test, exits 1
 uv run plimsoll scan ./tests/fixtures/compliant_s3  # the false-positive check, exits 0
 uv run plimsoll verify ./tests/fixtures/insecure_s3 # the full loop; needs PLIMSOLL_LLM_*
+
+opa check --strict src/plimsoll/policies            # the rule pack parses
+opa test src/plimsoll/policies                      # the rule pack's own unit tests
+uv run python benchmarks/runner.py --dry-run        # the benchmark wiring, spends nothing
 ```
+
+A cold `terraform init` downloads the AWS provider, which can exceed the 120s default on
+a slow link. Raise `--check-timeout` rather than assuming the configuration is wrong;
+`--timeout` is the whole-run budget and defaults to 600.
 
 Model configuration is three environment variables. Any OpenAI-compatible endpoint:
 
@@ -80,6 +100,14 @@ Run `ruff`, `mypy`, and `pytest` before declaring any task complete.
 - A missing external tool is not an error. `Check.is_available()` returns `False`, the run logs it and continues with the remaining checks. Report which checks ran in the output.
 - Prompts live in `src/plimsoll/llm/prompts/` as `.txt` files, not inline strings. They are content, not code.
 - No network calls in unit tests. LLM tests use the `null` provider or recorded fixtures.
+- Rego rules never carry severity. `checks/rule_map.py` is the only table; a severity a
+  rule author can raise alone is a severity nobody reviews.
+- Every rule in the pack needs a `*_test.rego` case, an entry in the violating corpus, and
+  the same resource fixed in the compliant one.
+- Adapter fixtures are captured from real runs, with a README recording tool versions and
+  the exact command. Never reconstructed from documentation. Hand-built inputs are fine in
+  `*_test.rego`, which asserts what a rule does with a shape rather than what shape a tool
+  emits.
 
 ## Things to not do
 
@@ -90,6 +118,8 @@ Run `ruff`, `mypy`, and `pytest` before declaring any task complete.
 - Do not make a GPU or a locally hosted model a requirement for any code path, test, or documented workflow. Most contributors do not have one, and a tool they cannot run is a tool they cannot contribute to. Hosted inference is the default; local is a supported option, never an assumption.
 - Do not send workspace content to a provider from anywhere except `core/context.py`. One egress point is the only reason redaction can be audited.
 - Do not widen a rule's scope to make a test pass. Fix the test fixture.
+- Do not put a pass-rate figure in the README, the CHANGELOG, or anywhere else until
+  `benchmarks/RESULTS.md` has real rows in it. The harness exists; no run has happened.
 
 ## Working style
 

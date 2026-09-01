@@ -29,24 +29,90 @@ If a decision contradicts a doc, update the doc in the same commit. Docs that dr
 
 | Phase | Status | Target | Actual |
 |---|---|---|---|
-| 0 — Baseline | Owned outside this repo | Week 1 | — |
-| 1 — Gate | In progress | Weeks 2–3 | — |
-| 2 — Loop | Not started | Weeks 4–5 | — |
-| 3 — Memory & provenance | Not started | Weeks 6–7 | — |
-| 4 — Ship | Not started | Week 8 | — |
-| 5 — Numbers | Not started | Weeks 9–10 | — |
+| 0 — Baseline | Harness built, nothing measured | Week 1 | 2026-09-01 (partial) |
+| 1 — Gate | Done | Weeks 2–3 | 2026-09-01 |
+| 2 — Loop | Built, not demonstrated against a live model | Weeks 4–5 | 2026-08-31 |
+| 3 — Memory & provenance | Done | Weeks 6–7 | 2026-09-01 |
+| 4 — Ship | Built, image never built | Week 8 | 2026-09-01 |
+| 5 — Numbers | Harness built, nothing measured | Weeks 9–10 | — |
+
+Four of the six say "built" and not "demonstrated". That is the honest state: the code is
+written and tested, and three things have never been exercised for real — a live model
+endpoint, the Action's container image, and the benchmark. Each is named in its phase
+below.
 
 ---
 
 ## Phase 0 — Establish the baseline
 
-_No entries yet._
+### 2026-09-01 — The harness, without the numbers
 
-**Exit criterion:** `benchmarks/BASELINE.md` published with an independently measured compliance pass rate, reproducible method, and model versions.
+**Done:** `benchmarks/runner.py`, a twelve-scenario set covering all twenty rule classes,
+and stub `BASELINE.md` / `RESULTS.md`. It prompts a model per scenario, scores the raw
+output with the gate, then runs the full loop over the same output and scores it again —
+both halves in one pass, so the two rates cannot drift apart on tool versions. Nineteen
+tests cover the scenario set, the fence stripping, the usage accounting, and the
+arithmetic.
+
+**Surprises:** Phase 0 was supposed to come first and did not, so the harness was written
+against a finished gate rather than the other way round. That turned out to help in one
+way — `summarise` could be tested against real `Decision` shapes rather than imagined ones
+— and to cost in another: the scenario set was written by the person who wrote the rule
+pack, so it probes this pack's opinions rather than an independent standard. That is
+written down in `RESULTS.md` under "what would make this claim weak", before any number
+exists to be defended.
+
+Deployability had to be scored separately from compliance. Terraform that does not parse
+produces no findings, so a model that emits garbage would otherwise score a perfect
+compliance rate.
+
+**Decisions:** token counts are estimates. `LLMProvider.complete` returns text and does
+not carry the chat-completions `usage` block, and widening that protocol to serve a
+benchmark would put reporting machinery in the one interface that has to stay small. The
+harness counts characters exactly and publishes characters/4, labelled as an estimate.
+
+**Next:** run it. It needs a free-tier endpoint and about ten minutes, and until it has
+been run, no pass-rate figure belongs anywhere in this repository.
+
+**Exit criterion:** `benchmarks/BASELINE.md` published with an independently measured compliance pass rate, reproducible method, and model versions. **Not met.**
 
 ---
 
 ## Phase 1 — The gate
+
+### 2026-09-01 — The rest of the Rego unit tests, and the retry that did not fire
+
+**What changed:** `iam_test.rego`, `s3_test.rego`, and `hygiene_test.rego` — 61 `opa test`
+cases where there were 19, covering every rule class the pack ships. `terraform_cli` now
+retries `terraform init` on a transport failure and tells a network problem apart from a
+configuration one.
+
+**Now unblocked:** a rule can be developed in a second instead of thirty. The S3 file is
+the one worth reading first: four of the five rules are *absence* rules decided from the
+`configuration` section rather than planned values, so every case has to carry both halves
+of the plan document. A test written against planned values alone would assert nothing
+about the rule that ships.
+
+**Surprise — the exact-set assertions collided with an account-level rule.**
+`logging.cloudtrail.absent` fires on any configuration holding an IAM or S3 resource,
+which is every input in two of the three files. Subtracting it there and asserting it
+directly in `hygiene_test.rego` keeps the exact-set comparisons meaning what they say.
+
+**Surprise — the init retry did not fire on the failure it was written for.** The known
+issue was a timeout to `releases.hashicorp.com`; running the documented smoke test
+reproduced it, and the classifier missed it twice over. Terraform hard-wraps its error
+output, so the real message had a newline between "read" and "tcp" and a pattern written
+with literal spaces matched nothing. And the failure surfaced as `wsarecv: A connection
+attempt failed`, which is the Windows socket layer's wording passed through by Go's net
+package — none of the Linux phrasings matched, so *every* dropped connection on Windows
+was being classified as a configuration error and told the user to go read their
+Terraform. The real output is now a test fixture, wrapping included.
+
+**Decision — retry only what is worth retrying.** A malformed `required_providers` block
+fails identically every time; retrying it spends the run budget three times over to print
+the same message. It raises on the first attempt. The backoff also never sleeps past the
+run deadline: waiting to retry something the run will not have time to use trades one
+useless failure for a slower one.
 
 ### 2026-09-01 — The rule-pack corpus, and the false positive it found
 
@@ -328,17 +394,64 @@ against it.
 
 ## Phase 4 — Ship
 
-_Not started._
+**Exit criterion:** ten lines of workflow YAML in an unrelated repo produce a useful PR comment. **Built, not demonstrated** — see below.
 
-**Exit criterion:** ten lines of workflow YAML in an unrelated repo produce a useful PR comment.
+### 2026-09-01 — The Action, the workflows, and one report per run
+
+**What changed:** `action/Dockerfile`, `action/entrypoint.sh`, `action/post_comment.py`,
+and `action.yml`; `.github/workflows/integration.yml` and `publish.yml`; CI hardened with
+SHA-pinned actions and `permissions: contents: read`; and `--report FORMAT=PATH` on the
+CLI. 43 new tests.
+
+**Now unblocked:** everything in Phase 4 except the demonstration.
+
+**Decision — `action.yml` at the repository root, not in `action/`.** A container action's
+build context is the directory holding the metadata file. From `action/`, the image could
+not see `src/` and so could not install the package it exists to run. The root also means
+one repository: `uses: <owner>/plimsoll@v0` resolves here, and the separate
+`plimsoll-action` repository the README promised would have been a synchronisation problem
+nobody asked for. The README now points at this one.
+
+**Surprise — the runner does not translate hyphens in input names.** An input called
+`fail-on` arrives as `INPUT_FAIL-ON`, which no shell can expand: `$INPUT_FAIL-ON` reads as
+`$INPUT_FAIL` followed by the literal text `-ON`. The failure is silent — the entrypoint
+would have fallen back to every default and reported on a threshold nobody chose. Every
+input is now mapped explicitly in `runs.env`, and a test asserts that none was forgotten.
+
+**Decision — `--report`, because the gate is expensive.** The first entrypoint ran the
+tool four times to get four formats, which for a `terraform init` plus a plan plus an
+`opa eval` is minutes of duplicated work — and three formats rendered from three runs can
+disagree if anything in the workspace moved between them. They are renderings of one
+decision, so the CLI now produces them from one.
+
+**Surprise — the SARIF `$schema` URL was a 404.** Trying to add the schema validation the
+plan asked for revealed that the URL every emitted record carried pointed into a branch
+layout the sarif-spec repository has since rearranged. Nothing in the suite had noticed,
+because nothing fetched it. Now the OASIS errata URL, with a test tying it to the workflow
+that validates against it. `check-jsonschema` has no vendored SARIF schema either, which
+the workflow would have discovered in CI had the command not been tried locally first.
+
+**Surprise — the exit-code handling was wrong under `set -e`.** The dogfood step asserted
+"the violating corpus fails" by letting `set -e` catch a non-zero exit, which cannot tell
+exit 1 (findings, correct) from exit 3 (nothing ran, a broken toolchain). It asserts the
+exact code now. That distinction is the entire reason exit 3 exists.
+
+**Still open — the image has never been built.** Docker Desktop was not running on this
+machine and could not be started non-interactively. The wiring is asserted by
+`tests/test_action.py` — every input reaches the container, every mapped variable is read,
+every documented output is written, and the versions pinned in the Dockerfile match the
+integration runner's — but that is static analysis of a shell script. The `action-image`
+job builds the image and drives it against the fixture corpus, and will be the first thing
+to have actually run it. **Until that job is green, this phase's exit criterion is
+untested rather than met.**
 
 ---
 
 ## Phase 5 — The numbers
 
-_Not started._
+_The harness is built; see the Phase 0 entry. Nothing has been measured._
 
-**Exit criterion:** an independent reader reproduces the headline delta from a clean checkout.
+**Exit criterion:** an independent reader reproduces the headline delta from a clean checkout. **Not met.**
 
 ---
 
@@ -346,12 +459,13 @@ _Not started._
 
 Move these into decisions as they resolve, with the reasoning.
 
-- [ ] Does `terraform plan` work reliably enough with dummy credentials for greenfield AWS configs, or is LocalStack required in the default dev path?
-- [ ] Is Checkov better as a subprocess or a direct import? Subprocess is the current call for version independence — revisit if parsing proves fragile.
-- [ ] What is the realistic verified-patch rate, and how many attempts does it take? This determines whether the tool earns its inference cost, and it needs the Rego pack plus the benchmark harness before it can be measured. Do not guess it in the README.
+- [x] **Does `terraform plan` work reliably enough with dummy credentials for greenfield AWS configs, or is LocalStack required in the default dev path?** Answered: placeholder credentials work, but not on their own. The AWS provider calls `sts:GetCallerIdentity` before it will plan anything, so the `skip_*` override file is required too — see the decision log. LocalStack stays the answer for configurations with `data` sources that genuinely reach the API, and is not in the default path. The remaining friction is not credentials at all: it is the cold provider download, which on a slow link exceeds the default per-check timeout.
+- [ ] Is Checkov better as a subprocess or a direct import? Subprocess is the current call for version independence — revisit if parsing proves fragile. *(Still open, and now slightly worse: checkov's console script is broken on this machine with `ModuleNotFoundError: No module named 'checkov'`, so the adapter has never been exercised end to end here. The image and the integration runner install it properly, which is where it will first be tested.)*
+- [ ] What is the realistic verified-patch rate, and how many attempts does it take? *(The harness now measures it — `benchmarks/runner.py` reports mean attempts per finding and the escalation rate. Nobody has run it. Still: do not guess it in the README.)*
 - [ ] Which small hosted models clear the bar? The prompts are written to work on modest models, but that is an intention until it is measured across a few.
 - [ ] How reliably can `generated_by` be detected without a flag? Commit trailers and PR labels are both weak signals.
-- [ ] Does the dedup key `(resource_address, rule_class)` hold up when Checkov and OPA disagree on severity for the same violation?
+- [ ] Does the dedup key `(resource_address, rule_class)` hold up when Checkov and OPA disagree on severity for the same violation? *(Untested in practice: checkov has not run alongside the pack on this machine. The corpus is where it will show up.)*
+- [ ] Is `verify`'s per-patch-attempt `terraform init` worth optimising? `TF_PLUGIN_CACHE_DIR` makes it a local copy rather than a download, so it is a cost and not a bug. Measure before building a shared `TF_DATA_DIR`.
 
 ---
 
@@ -385,8 +499,60 @@ Architectural decisions and their reasoning. Append-only — supersede rather th
 **Cost:** larger prompts, and a file-size ceiling above which a finding cannot be patched. Both are cheaper than an unreliable applier.
 **Supersedes:** the `Patch` shape and `patch.txt` contract in `specifications.md`, both updated in place with the reasoning recorded there.
 
+### 2026-09-01 — Terraform runs against a copy, with an injected provider override
+
+**Decision:** when the workspace is not already initialised, terraform runs against a
+throwaway copy in the run's scratch directory, and — only when no real credentials are
+present *and* a default `provider "aws"` block exists — a `plimsoll_provider_override.tf`
+is written into that copy setting `skip_credentials_validation`,
+`skip_requesting_account_id`, and `skip_region_validation`.
+
+**Reasoning:** two constraints that look separate and are not. `terraform init` writes
+`.terraform/` and `.terraform.lock.hcl` into its working directory, and this tool promises
+never to modify your repository; that promise does not get an exception for "but terraform
+needs it". And placeholder credentials alone do not produce a plan: the AWS provider calls
+`sts:GetCallerIdentity` first, gets `InvalidClientTokenId`, and fails the whole plan —
+which would be reported as a finding about the user's configuration when it is really a
+fact about the machine having no AWS account. Both are solved by the same throwaway copy.
+
+**Cost:** the tool now writes a file into a copy of somebody's configuration, which is
+exactly the kind of thing a security tool should not do quietly. Documented in
+`SECURITY.md` and `architecture.md` with both preconditions spelled out, and the file's
+own header explains itself to anyone who finds it. The three arguments relax checks about
+*the caller* and change nothing about how any resource is planned, which is the only thing
+the rule pack reads.
+
+**Supersedes:** `architecture.md`'s "runs against dummy credentials", which was true and
+insufficient.
+
+### 2026-09-01 — Findings are redacted at construction, not at serialisation
+
+**Decision:** `Finding.message` and `Finding.raw` are redacted by the model's own
+validator. `Patch.new_content` never enters a provenance record at all.
+
+**Reasoning:** the plan was to redact on the way into provenance. That leaves the secret in
+memory and on every path that does not go through that boundary — the terminal report, the
+JSON report, a log line. A finding carries a checker's verbatim message and its unmodified
+output, and either can contain the credential the checker just found. Redacting in the
+validator means there is no path on which an unredacted finding exists, because one cannot
+be constructed. `Patch.new_content` is the deliberate opposite case: it is the whole
+corrected file with secrets *restored*, which is what it has to be to be applied, so it is
+excluded rather than redacted.
+
+**Cost:** `Finding.id` had to stay derived from the unredacted identity fields, or
+redaction would silently change what deduplicates and what an exception matches. Asserted
+by a test.
+
+**Supersedes:** the Phase 3 task "apply redaction before serialisation too", and the gap
+`SECURITY.md` named.
+
 ---
 
 ## Blocked
 
 _Nothing blocked._
+
+Three things are **unverified rather than blocked**, each needing something this machine
+does not have: a live model endpoint, a working Docker daemon, and a free-tier API key.
+They are the benchmark run, the Action image build, and the first real provider call.
+Nothing depends on them to continue; everything depends on them to be believed.

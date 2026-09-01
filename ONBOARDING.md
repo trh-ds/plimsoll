@@ -159,34 +159,35 @@ Built and working today:
 |---|---|
 | Core data model | `Finding`, `Patch`, `Decision`, `GateResult` — the shapes everything passes around |
 | The gate | Runs check adapters, isolates crashes, aggregates results |
-| `terraform_validate` adapter | Wraps `terraform validate` |
-| `checkov` adapter | Wraps Checkov |
+| All four adapters | `terraform_validate`, `terraform_plan`, `checkov`, `opa` |
+| The bundled rule pack | 20 Rego rules across IAM, S3, network, data stores, and hygiene |
 | Deduplication | Two tools reporting one problem collapse into one finding |
 | **The AI loop** | Steps 2–5 above. Explain, patch, re-verify, escalate |
 | **Model providers** | Any OpenAI-compatible endpoint, plus a `null` one for tests |
-| **Secret redaction** | Strips credentials from prompts, reversibly |
-| `plimsoll scan` / `verify` / `explain` / `doctor` | Working CLI with correct exit codes |
-| Terminal + JSON reporters | Human-readable and machine-readable output |
-| Test fixture corpus | A deliberately broken Terraform config and a clean one |
+| **Secret redaction** | Strips credentials from prompts *and* from findings, at construction |
+| Exception store | "We accepted this finding last week, don't ask again" |
+| Provenance records | The audit trail, with a published JSON schema |
+| `plimsoll scan` / `verify` / `explain` / `exceptions` / `doctor` | Working CLI with correct exit codes |
+| Terminal, JSON, SARIF, PR-comment reporters | Including the format GitHub's security tab reads |
+| GitHub Action | Built; the image has never been built, so CI will run it first |
+| Benchmark harness | Built and tested |
+| Test fixture corpus | Broken and clean Terraform, plus tool output recorded from real runs |
 
-Not built at all:
+Not done:
 
 | Piece | Notes |
 |---|---|
-| `opa` and `terraform_plan` adapters | Next up. Interface is ready for them |
-| The bundled rule pack | 20 Rego rules specified, zero written |
-| Exception store | "We accepted this finding last week, don't ask again" |
-| Provenance records | The audit trail |
-| SARIF output | The standard format GitHub's security tab reads |
-| GitHub Action, PR comments | How anyone would actually use this |
-| Benchmarks | The numbers that would make anyone believe it works |
+| **The numbers** | The harness exists and nothing has been run. There is no measured pass rate anywhere, and there must not be one until there is |
+| A live provider run | Every path is tested against scripted providers and recorded payloads. That is not the same as having talked to a real router |
+| Exception precedent in prompts | The store exists; the prompt doesn't yet cite prior accepted exceptions |
+| A PyPI release | The publish workflow is ready; the name isn't reserved |
 
-Roughly: **2,100 lines of source, 183 unit tests, 3 tests that shell out to real tools.**
+Roughly: **4,400 lines of Python and 1,200 of Rego; 399 unit tests, 10 that shell out to
+real tools, and 61 Rego tests run by `opa test`.**
 
-The loop works. What it doesn't have yet is much to reason *about* — the bundled rule
-pack is unwritten, so findings only come from Checkov and `terraform validate`. Writing
-those rules is the single biggest chunk of work left, and it's the part that most needs
-someone who's read what the rules are supposed to catch.
+The interesting work left is no longer "write the rules" — it's the row at the top of the
+second table. Someone has to run the benchmark and find out whether the loop actually
+raises the pass rate, and by how much. **A low honest number is the product.**
 
 Honest framing: this is early. That's good for you — the parts left are self-contained
 and there's no legacy to fight.
@@ -211,23 +212,33 @@ src/plimsoll/
   core/
     models.py      Every data shape. Read this first — it's the vocabulary
     gate.py        Runs the checks, collects findings, deduplicates
+    deadline.py    The run budget. Why a slow run exits 4 instead of hanging
     context.py     Builds the prompts. The only place your code leaves your machine
     verifier.py    Applies a patch to a scratch copy and re-runs the gate on it
     loop.py        Sequences it: explain, patch, verify, retry, escalate
     redaction.py   Strips credentials out of anything model-bound
+    exceptions.py  "We accepted this last week" — the YAML store and its matching
+    provenance.py  The audit record, its canonical JSON, and its hash
   checks/          One file per external tool
     terraform_validate.py
+    terraform_plan.py
+    terraform_cli.py Shared: where terraform runs, and why never in your repo
     checkov.py
+    opa.py           Evaluates the Rego pack against the plan JSON
+    locator.py       Resource address → file and line; plan JSON has neither
     severity_map.py  Explicit tables: this tool's "error" means our HIGH
     rule_map.py      Explicit tables: Checkov's CKV_AWS_20 means "public bucket, CRITICAL"
     addresses.py     Parses "module.reports.aws_s3_bucket.data" into its parts
+  policies/        The rule pack, in Rego. lib + one file per area, and its own tests
   llm/             Talking to models. Nothing outside this folder names a model
     openai_compat.py  Any endpoint speaking the OpenAI API — which is nearly all of them
     null.py           A provider that refuses. For tests and --no-llm
     prompts/          explain.txt and patch.txt. Content, not code
-  reporters/       Output formats
+  reporters/       terminal, json_report, sarif, github
   cli.py           The command line
 
+action/            The GitHub Action's image and entrypoint (action.yml is at the root)
+benchmarks/        The harness that would tell us whether any of this works
 tests/
   fixtures/        Real captured tool output + deliberately broken Terraform
   conftest.py      Fake tools and fake models, shared by the loop tests
@@ -281,15 +292,16 @@ You need [uv](https://docs.astral.sh/uv/) (Python package manager) and Python 3.
 git clone https://github.com/trh-ds/plimsoll
 cd plimsoll
 uv sync
-uv run pytest        # 183 tests, needs no cloud tools, no model, no network
+uv run pytest -m "not slow"   # 399 tests, needs no cloud tools, no model, no network
 ```
 
-The test suite deliberately requires **nothing** external — no Terraform, no Checkov, no
+The unit suite deliberately requires **nothing** external — no Terraform, no Checkov, no
 model, no network. It runs against JSON output captured from real tool runs and committed
 to the repo. So you can work on most of this project without installing anything
 cloud-related at all.
 
-To see it do real work, install Checkov (`uv tool install checkov`) and then:
+To see it do real work, install the tools (`uv tool install checkov`, plus `terraform` and
+`opa` on `PATH`) and then:
 
 ```bash
 uv run plimsoll doctor                            # which tools can run
@@ -300,14 +312,27 @@ uv run plimsoll scan tests/fixtures/compliant_s3  # exit code 0
 Output looks like:
 
 ```
-Checks run: checkov 3.3.15
-  skipped terraform_validate: terraform not found on PATH
+Checks run: opa 1.20.1, terraform 1.15.8
+  skipped checkov: checkov not found on PATH
 
   CRITICAL s3.acl.public                      aws_s3_bucket.reports
-           S3 Bucket has an ACL defined which allows public READ access.
-           main.tf:28  [checkov CKV_AWS_20]
+           Bucket ACL is "public-read", which makes its objects readable by anyone
+           on the internet.
+           main.tf:28  [opa PLIM_S3_001]
 
-16 finding(s), 6 at or above HIGH.
+8 finding(s), 5 at or above HIGH.
+```
+
+The first run is slow: `terraform init` downloads the AWS provider, which is a few hundred
+megabytes. It is cached afterwards. If it times out, raise `--check-timeout` — the failure
+is your connection, not your Terraform, and the message will say so.
+
+The rules the `opa` lines come from are in `src/plimsoll/policies/`, and they have their
+own tests that need no terraform at all:
+
+```bash
+opa check --strict src/plimsoll/policies
+opa test src/plimsoll/policies      # 61 tests, about a second
 ```
 
 ### And to see the AI part
@@ -353,46 +378,110 @@ work. You never see them. Most AI tools would have shown you the best-looking on
 
 These are pure Python against data structures that are already defined and tested.
 
-1. **SARIF reporter.** SARIF is a standard JSON format for static-analysis results; GitHub
-   reads it to show findings inline on pull requests. It's a documented spec and a
-   mapping exercise from `GateResult`. Start from `reporters/json_report.py`, which is
-   27 lines.
-2. **Whole-run timeout and exit code 4.** Right now `--timeout` is per-check. The spec
-   wants a budget for the entire run, exiting 4 if exceeded. Contained in `cli.py` and
-   `gate.py`.
-3. **Better terminal output.** Findings currently print as a flat list. Grouping by file,
+1. **Better terminal output.** Findings currently print as a flat list. Grouping by file,
    or a `--summary` mode that prints counts only, is self-contained in
    `reporters/terminal.py`.
-4. **Deduplication edge cases.** `_deduplicate` in `gate.py` is about 20 lines with clear
+2. **Deduplication edge cases.** `_deduplicate` in `gate.py` is about 20 lines with clear
    rules. Reading it and trying to break it with a test is a genuinely useful hour.
-5. **More secret patterns.** `core/redaction.py` strips credentials out of anything sent
-   to a model. It currently knows AWS keys, GitHub/Slack/OpenAI tokens, Google API keys,
-   JWTs, and PEM blocks. Every pattern it doesn't know is a credential that gets
-   transmitted. One regex plus one test, and it is real security work — probably the
-   highest value-per-line task on this list.
-6. **Break the loop.** `tests/conftest.py` has a fake scanner and a fake model, so you can
+3. **More secret patterns.** `core/redaction.py` strips credentials out of anything sent
+   to a model, and out of every finding at construction. It currently knows AWS keys,
+   GitHub/Slack/OpenAI tokens, Google API keys, JWTs, and PEM blocks. Every pattern it
+   doesn't know is a credential that gets transmitted. One regex plus one test, and it is
+   real security work — probably the highest value-per-line task on this list.
+4. **Break the loop.** `tests/conftest.py` has a fake scanner and a fake model, so you can
    script "the model returns *this*" and assert what the loop does. Try to find a
    sequence where an unverified patch reaches the output. If you find one, that's a
    serious bug and we'd want to know.
+5. **Run the benchmark.** `benchmarks/runner.py` needs a free-tier endpoint and about ten
+   minutes, and it produces the number this whole project is arguing about. Nobody has run
+   it. `benchmarks/README.md` has the commands, and `RESULTS.md` already lists the reasons
+   the result might be weak, written down before the numbers exist so they cannot be
+   chosen to avoid them.
 
 ### Needs a little, and teaches you the rest
 
-7. **A new check adapter — Trivy or KICS.** Both are scanners like Checkov. You install
+6. **A new check adapter — Trivy or KICS.** Both are scanners like Checkov. You install
    the tool, run it against `tests/fixtures/insecure_s3`, look at its JSON, and write a
    file that maps that JSON onto `Finding`. `checks/checkov.py` is the worked example.
    The step-by-step is in [`CONTRIBUTING.md`](CONTRIBUTING.md#walkthrough-add-a-check-adapter).
-8. **Extend `rule_map.py`.** Checkov has ~1,000 rules; we've classified 10. Each addition
+7. **Extend `rule_map.py`.** Checkov has ~1,000 rules; we've classified 10. Each addition
    means running Checkov against a config, reading what fires, and deciding which of our
    rule classes it means. Mechanical, and you learn the domain as you go.
-9. **Improve the prompts.** They're plain text files in `llm/prompts/`, no code. If the
+8. **Improve the prompts.** They're plain text files in `llm/prompts/`, no code. If the
    model keeps making a particular mistake, the fix is usually a sentence here. Needs an
    endpoint to test against, but no cloud knowledge.
 
 ### Needs real cloud knowledge
 
-10. **The Rego rule pack.** 20 rules specified in `specifications.md`, none written. This
-    is the biggest remaining piece of work in the project.
-11. **The `terraform_plan` adapter.** Runs a plan and hands the JSON to OPA.
+9. **A twenty-first rule.** The walkthrough is below. This is where domain knowledge turns
+   directly into something the tool can catch.
+10. **Review the severities.** The twenty rule classes in `checks/rule_map.py` and their
+    severities encode security judgement, by one person, unreviewed. They are the thing a
+    user is trusting. Disagreeing with one, in an issue, with a reason, is a real
+    contribution.
+
+### Walkthrough: add a rule to the pack
+
+The pack lives in `src/plimsoll/policies/`, grouped by area: `iam`, `s3`, `network`,
+`datastore`, `hygiene`, on a shared `lib`. A rule is five things, and none of them is
+large.
+
+**1. Write the rule.** Add a `findings contains f if { ... }` block to the group it
+belongs in. Every rule reads `terraform plan` JSON. Two sections of it matter and they
+answer different questions — `lib.rego` explains which to use when, and the short version
+is: `planned_values` for "is this attribute dangerous", `configuration` for "does anything
+point at this bucket" and for literals that never survive into a plan.
+
+```rego
+findings contains f if {
+	some r in lib.resources_of("aws_sqs_queue")
+	not r.values.kms_master_key_id
+	f := {
+		"rule_id": "PLIM_SQS_001",
+		"rule_class": "sqs.encryption.missing",
+		"resource_address": r.address,
+		"resource_type": r.type,
+		"message": "This queue is not encrypted at rest.",
+		"remediation": "Set kms_master_key_id to a KMS key.",
+	}
+}
+```
+
+No severity. Severity lives in `checks/rule_map.py` and nowhere else — a severity a rule
+author can raise on their own is a severity nobody reviews.
+
+**2. Classify it.** Add a `PolicyRule` entry to `PLIMSOLL` in `checks/rule_map.py` with
+the severity and any benchmark reference (CIS, NIST).
+
+**3. Unit-test it,** in the `*_test.rego` beside the rule. These use small hand-built plan
+documents and run in under a second, so you can iterate without terraform in the loop.
+Test the negative case as hard as the positive one: a rule that fires is easy to write, a
+rule that fires *only* when it should is the one a team leaves switched on.
+
+```bash
+opa check --strict src/plimsoll/policies
+opa test src/plimsoll/policies
+```
+
+**4. Add it to the fixture corpus.** A violation in
+`tests/fixtures/rules/violating/<group>.tf`, and the *same resource, fixed* in
+`tests/fixtures/rules/compliant/<group>.tf`. `tests/test_rule_corpus.py` then asserts that
+your rule fires against the first and that nothing fires against the second — it runs a
+real plan, so it is marked `slow`.
+
+**5. Run it end to end.**
+
+```bash
+uv run pytest -m slow                                  # needs terraform and opa on PATH
+uv run plimsoll scan tests/fixtures/rules/violating    # your rule should appear
+uv run plimsoll scan tests/fixtures/rules/compliant    # exit 0, or you have a false positive
+```
+
+If the compliant corpus fires, **fix the rule or fix the fixture — never widen the rule to
+make the test pass.** That corpus has already caught one false positive: the AWS provider
+types `encrypted` as a *string* on a launch template's block device, so plan JSON carries
+`"true"` and a rule comparing against `true` reported every encrypted template as
+unencrypted.
 
 ### Before you start
 
