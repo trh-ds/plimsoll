@@ -30,12 +30,31 @@ import os
 import re
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 from plimsoll.core.gate import CheckContext, CheckExecutionError
 
 BINARY = "terraform"
 VERSION_TIMEOUT_SECONDS = 30
+
+# `terraform init` is the one subcommand that reaches the network, and the registry is
+# the one dependency of this tool nobody here controls. A dropped connection is worth
+# retrying; a malformed `required_providers` block is not, and retrying it burns the run
+# budget three times over to print the same message.
+INIT_ATTEMPTS = 3
+INIT_BACKOFF_SECONDS = (2.0, 6.0)
+
+# Matched against init's own output. Deliberately about transport, not about terraform:
+# every phrase here is something that happened to a socket.
+_TRANSIENT_NETWORK = re.compile(
+    r"(?i)\b("
+    r"dial tcp|connection reset|connection refused|network is unreachable"
+    r"|no such host|temporary failure in name resolution|tls handshake"
+    r"|i/o timeout|timeout awaiting|unexpected eof|502 bad gateway"
+    r"|503 service unavailable|429 too many requests"
+    r")\b"
+)
 
 # Copied into the throwaway working directory; everything else is left behind.
 _SKIP = shutil.ignore_patterns(
@@ -202,9 +221,48 @@ def _run(
             check=False,
         )
     except subprocess.TimeoutExpired as exc:
-        raise CheckExecutionError(f"{BINARY} {args[0]} exceeded {timeout}s") from exc
+        raise CheckExecutionError(_timeout_message(args[0], timeout)) from exc
     except OSError as exc:
         raise CheckExecutionError(f"could not execute {BINARY} {args[0]}: {exc}") from exc
+
+
+def _timeout_message(subcommand: str, timeout: int) -> str:
+    """Say which knob to turn, because the default one is frequently the wrong size.
+
+    A cold `terraform init` downloads the provider -- the AWS provider is several hundred
+    megabytes -- and on a slow link that alone can exceed the 120s default. "exceeded
+    120s" on its own reads as a broken configuration, which sends people to look at their
+    Terraform rather than at the flag.
+    """
+    if subcommand != "init":
+        return f"{BINARY} {subcommand} exceeded {timeout}s"
+    return (
+        f"{BINARY} init exceeded {timeout}s. A cold provider download can take longer than "
+        "this on a slow connection; raise --check-timeout, or pre-populate "
+        "TF_PLUGIN_CACHE_DIR."
+    )
+
+
+def is_transient_network_failure(output: str) -> bool:
+    """Whether an init failure was the network rather than the configuration."""
+    return bool(_TRANSIENT_NETWORK.search(output))
+
+
+def _init_failure_message(output: str) -> str:
+    """Two very different problems, told apart before the user has to guess.
+
+    Both leave the run at exit 3 with nothing verified, and both used to print the same
+    sentence. One means "try again"; the other means "your configuration is wrong". A
+    reader who cannot tell them apart debugs the wrong one.
+    """
+    detail = output.strip()[:400]
+    if is_transient_network_failure(output):
+        return (
+            f"`{BINARY} init` could not reach the provider registry after {INIT_ATTEMPTS} "
+            f"attempts, so nothing could be verified. This is a network failure, not a "
+            f"problem with your configuration: {detail}"
+        )
+    return f"`{BINARY} init` failed, so nothing could be verified: {detail}"
 
 
 def needs_credential_override(workspace: Path) -> bool:
@@ -234,16 +292,42 @@ def _initialise(ctx: CheckContext) -> Path:
     if needs_credential_override(ctx.workspace):
         (workdir / OVERRIDE_FILENAME).write_text(CREDENTIAL_OVERRIDE, encoding="utf-8")
 
-    completed = _run(
-        ["init", "-input=false", "-backend=false", "-no-color"],
-        workdir,
-        base_env(),
-        ctx.deadline.cap(ctx.config.timeout_seconds),
-    )
-    if completed.returncode != 0:
-        detail = (completed.stderr or completed.stdout).strip()[:400]
-        raise CheckExecutionError(f"`{BINARY} init` failed, so nothing could be verified: {detail}")
+    _init_with_retries(workdir, ctx)
     return workdir
+
+
+def _init_with_retries(workdir: Path, ctx: CheckContext) -> None:
+    """Run `terraform init`, retrying only what is worth retrying.
+
+    A dropped connection to the registry is the single most common way a run of this tool
+    fails on a laptop, and it is the one failure where trying again is the whole fix. A
+    configuration error is not: it fails identically every time, so it is raised on the
+    first attempt rather than after three.
+
+    The backoff is bounded by the run deadline. Sleeping past the budget to retry
+    something the run will not have time to use trades one useless failure for a slower
+    one.
+    """
+    output = ""
+    for attempt in range(INIT_ATTEMPTS):
+        completed = _run(
+            ["init", "-input=false", "-backend=false", "-no-color"],
+            workdir,
+            base_env(),
+            ctx.deadline.cap(ctx.config.timeout_seconds),
+        )
+        if completed.returncode == 0:
+            return
+        output = completed.stderr or completed.stdout
+        if not is_transient_network_failure(output) or attempt == INIT_ATTEMPTS - 1:
+            break
+        pause = INIT_BACKOFF_SECONDS[attempt]
+        remaining = ctx.deadline.remaining
+        if remaining is not None and remaining <= pause:
+            break
+        time.sleep(pause)
+
+    raise CheckExecutionError(_init_failure_message(output))
 
 
 def workdir(ctx: CheckContext) -> Path:

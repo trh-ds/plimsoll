@@ -7,19 +7,26 @@ which it appears are worth pinning down exactly.
 
 from __future__ import annotations
 
+import subprocess
+
 import pytest
 
 from plimsoll.checks import terraform_cli
 from plimsoll.checks.terraform_cli import (
+    INIT_ATTEMPTS,
     OVERRIDE_FILENAME,
     base_env,
     has_default_aws_provider,
     has_real_credentials,
+    is_transient_network_failure,
     needs_credential_override,
     parse_version,
     plugin_cache_dir,
     with_dummy_credentials,
 )
+from plimsoll.core.deadline import Deadline
+from plimsoll.core.gate import CheckExecutionError
+from plimsoll.core.models import CheckConfig
 
 _AWS_ENV = (
     "AWS_ACCESS_KEY_ID",
@@ -152,6 +159,122 @@ def test_apply_is_not_reachable_from_this_module():
         text = handle.read()
     assert '"apply"' not in text
     assert "'apply'" not in text
+
+
+class FakeInit:
+    """Stands in for `_run`, returning a scripted result per attempt."""
+
+    def __init__(self, *results: tuple[int, str]) -> None:
+        self.results = list(results)
+        self.calls = 0
+
+    def __call__(self, args, cwd, env, timeout):
+        self.calls += 1
+        code, stderr = self.results[min(self.calls - 1, len(self.results) - 1)]
+        return subprocess.CompletedProcess(args, code, stdout="", stderr=stderr)
+
+
+@pytest.fixture
+def no_sleeping(monkeypatch):
+    """The backoff is real time, and a unit suite should not spend it."""
+    slept: list[float] = []
+    monkeypatch.setattr(terraform_cli.time, "sleep", slept.append)
+    return slept
+
+
+def init(monkeypatch, tmp_path, fake, deadline=None):
+    monkeypatch.setattr(terraform_cli, "_run", fake)
+    ctx = terraform_cli.CheckContext(
+        tmp_path, CheckConfig(timeout_seconds=5), deadline=deadline or Deadline.none()
+    )
+    terraform_cli._init_with_retries(tmp_path, ctx)
+
+
+_DIAL = "Error: Failed to install provider\n\ndial tcp 1.2.3.4:443: i/o timeout"
+_BAD_CONFIG = 'Error: Invalid provider requirement\n\non main.tf line 3: version "~> not-a-version"'
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        _DIAL,
+        "read: connection reset by peer",
+        "dial tcp: lookup registry.terraform.io: no such host",
+        "TLS handshake timeout",
+        "unexpected EOF",
+        "received 503 Service Unavailable",
+    ],
+)
+def test_transport_failures_are_recognised(output):
+    assert is_transient_network_failure(output)
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        _BAD_CONFIG,
+        'Error: Unsupported argument\n\nAn argument named "buckt" is not expected here.',
+        "Error: Module not installed",
+        "",
+    ],
+)
+def test_a_configuration_error_is_not_mistaken_for_the_network(output):
+    assert is_transient_network_failure(output) is False
+
+
+def test_a_registry_blip_is_retried_and_succeeds(monkeypatch, tmp_path, no_sleeping):
+    fake = FakeInit((1, _DIAL), (0, ""))
+    init(monkeypatch, tmp_path, fake)
+
+    assert fake.calls == 2
+    assert no_sleeping == [terraform_cli.INIT_BACKOFF_SECONDS[0]]
+
+
+def test_a_persistent_network_failure_gives_up_and_says_it_was_the_network(
+    monkeypatch, tmp_path, no_sleeping
+):
+    fake = FakeInit((1, _DIAL))
+    with pytest.raises(CheckExecutionError) as exc:
+        init(monkeypatch, tmp_path, fake)
+
+    assert fake.calls == INIT_ATTEMPTS
+    assert "network failure, not a problem with your configuration" in str(exc.value)
+
+
+def test_a_configuration_error_is_not_retried(monkeypatch, tmp_path, no_sleeping):
+    """Retrying it burns the run budget three times over to print the same message."""
+    fake = FakeInit((1, _BAD_CONFIG))
+    with pytest.raises(CheckExecutionError) as exc:
+        init(monkeypatch, tmp_path, fake)
+
+    assert fake.calls == 1
+    assert no_sleeping == []
+    assert "Invalid provider requirement" in str(exc.value)
+
+
+def test_the_backoff_does_not_sleep_past_the_run_budget(monkeypatch, tmp_path, no_sleeping):
+    """Waiting to retry something the run will not have time to use is a slower failure."""
+    fake = FakeInit((1, _DIAL))
+    with pytest.raises(CheckExecutionError):
+        init(monkeypatch, tmp_path, fake, deadline=Deadline(1))
+
+    assert fake.calls == 1
+    assert no_sleeping == []
+
+
+def test_a_first_attempt_success_does_not_retry(monkeypatch, tmp_path, no_sleeping):
+    fake = FakeInit((0, ""))
+    init(monkeypatch, tmp_path, fake)
+    assert fake.calls == 1
+
+
+def test_an_init_timeout_names_the_flag_that_fixes_it():
+    """ "exceeded 120s" alone sends people to look at their Terraform, which is fine."""
+    message = terraform_cli._timeout_message("init", 120)
+    assert "--check-timeout" in message
+    assert "TF_PLUGIN_CACHE_DIR" in message
+    # Other subcommands do not reach the network, so the advice would be wrong there.
+    assert terraform_cli._timeout_message("plan", 120) == "terraform plan exceeded 120s"
 
 
 def test_the_override_only_relaxes_checks_about_the_caller():
