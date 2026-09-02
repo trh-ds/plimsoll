@@ -78,6 +78,16 @@ def test_fail_on_is_honoured(monkeypatch, tmp_path):
     assert result.exit_code == 1
 
 
+def test_fail_on_accepts_lowercase(monkeypatch, tmp_path):
+    # The GitHub Action's own `fail-on` input defaults to lowercase ("high") and is
+    # documented in lowercase in the README -- a case-sensitive option would break the
+    # Action's shipped default on every run.
+    use_gate(monkeypatch, [StubCheck("checkov", available(), [finding(Severity.MEDIUM)])])
+    result = runner.invoke(cli.app, ["scan", str(tmp_path), "--fail-on", "medium"])
+
+    assert result.exit_code == 1
+
+
 def test_no_check_available_exits_three_even_with_no_findings(monkeypatch, tmp_path):
     """A broken toolchain must not be able to look like a clean pass."""
     use_gate(monkeypatch, [StubCheck("checkov", ToolAvailability.missing("checkov", "gone"))])

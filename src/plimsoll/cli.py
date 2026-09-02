@@ -272,7 +272,11 @@ def scan(
     path: Annotated[Path, typer.Argument(help="Directory of Terraform to scan.")],
     fail_on: Annotated[
         Severity,
-        typer.Option("--fail-on", help="Minimum severity that sets a non-zero exit."),
+        typer.Option(
+            "--fail-on",
+            help="Minimum severity that sets a non-zero exit.",
+            case_sensitive=False,
+        ),
     ] = Severity.HIGH,
     output_format: Annotated[
         OutputFormat, typer.Option("--format", help="Report format.")
@@ -379,7 +383,12 @@ def _run_loop(
 def verify(
     path: Annotated[Path, typer.Argument(help="Directory of Terraform to verify.")],
     fail_on: Annotated[
-        Severity, typer.Option("--fail-on", help="Minimum severity that sets a non-zero exit.")
+        Severity,
+        typer.Option(
+            "--fail-on",
+            help="Minimum severity that sets a non-zero exit.",
+            case_sensitive=False,
+        ),
     ] = Severity.HIGH,
     output_format: Annotated[
         OutputFormat, typer.Option("--format", help="Report format.")
@@ -433,7 +442,12 @@ def verify(
 def explain(
     path: Annotated[Path, typer.Argument(help="Directory of Terraform to explain.")],
     fail_on: Annotated[
-        Severity, typer.Option("--fail-on", help="Minimum severity that sets a non-zero exit.")
+        Severity,
+        typer.Option(
+            "--fail-on",
+            help="Minimum severity that sets a non-zero exit.",
+            case_sensitive=False,
+        ),
     ] = Severity.HIGH,
     output_format: Annotated[
         OutputFormat, typer.Option("--format", help="Report format.")
