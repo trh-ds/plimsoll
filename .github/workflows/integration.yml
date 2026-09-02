@@ -81,7 +81,10 @@ jobs:
         run: |
           set -euo pipefail
           uv run plimsoll doctor | tee doctor.txt
-          if grep -q '^missing' doctor.txt; then
+          # Excludes the model line: no PLIMSOLL_LLM_* is configured for this job, so
+          # "missing model" is expected here -- invariant 4 says deterministic mode must
+          # work without it. Only a missing *adapter* means a binary failed to install.
+          if grep -v '^missing  *model' doctor.txt | grep -q '^missing'; then
             echo "::error::an adapter is unavailable on a runner that installed all of them"
             exit 1
           fi
