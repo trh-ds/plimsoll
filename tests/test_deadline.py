@@ -25,7 +25,12 @@ def test_an_unbounded_deadline_never_expires_and_never_caps():
     assert budget.cap(120) == 120
 
 
-def test_a_bounded_deadline_caps_a_subprocess_timeout():
+def test_a_bounded_deadline_caps_a_subprocess_timeout(monkeypatch):
+    # Real elapsed time between construction and `.cap()` would make `int(remaining)`
+    # truncate below the exact second boundary on any clock with enough resolution to
+    # see it -- flaky on Linux CI, silently masked on Windows' coarser monotonic(). Freeze
+    # the clock so the arithmetic is exercised without depending on wall time at all.
+    monkeypatch.setattr(time, "monotonic", lambda: 1000.0)
     budget = Deadline(5)
     assert budget.bounded is True
     assert budget.cap(120) == 5
