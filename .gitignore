@@ -8,6 +8,7 @@ dist/
 build/
 *.egg-info/
 .terraform/
+.env
 
 # Benchmark runs: generated Terraform and results, per run. Kept locally, not committed --
 # a committed run is a claim, and claims belong in BASELINE.md and RESULTS.md.
