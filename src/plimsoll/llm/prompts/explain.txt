@@ -10,7 +10,7 @@ Location: {location}
 
 Checker message:
 {message}
-
+{precedent}
 The offending configuration:
 ```hcl
 {snippet}

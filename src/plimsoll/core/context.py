@@ -12,6 +12,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from plimsoll.core.exceptions import ExceptionStore
 from plimsoll.core.models import Finding
 from plimsoll.core.redaction import Redactor
 
@@ -130,7 +131,34 @@ def _base_fields(finding: Finding) -> dict[str, str]:
     }
 
 
-def build_explain_prompt(finding: Finding, workspace: Path, redactor: Redactor) -> str:
+def _precedent(exceptions: ExceptionStore | None, finding: Finding) -> str:
+    """Prior accepted exceptions for this rule class elsewhere in the repo.
+
+    Filtered on rule class alone, not resource: a live exception for this exact finding
+    already exempted it before it became a candidate (see `VerifierLoop.run`), so anything
+    matched here is either about a different resource or the same one after it lapsed.
+    """
+    if exceptions is None:
+        return ""
+    matches = [e for e in exceptions.entries if e.rule_class == finding.rule_class]
+    if not matches:
+        return ""
+    lines = "\n".join(
+        f'- {e.resource_address}: "{e.justification}" (approved by {e.approved_by})'
+        for e in matches
+    )
+    return (
+        "\nThis rule class has been accepted as an exception elsewhere in this "
+        f"repository before, for reference:\n{lines}\n"
+    )
+
+
+def build_explain_prompt(
+    finding: Finding,
+    workspace: Path,
+    redactor: Redactor,
+    exceptions: ExceptionStore | None = None,
+) -> str:
     """Prompt for a prose explanation. Sends the offending block, not the whole file."""
     try:
         content = read_workspace_file(workspace, finding)
@@ -142,6 +170,7 @@ def build_explain_prompt(finding: Finding, workspace: Path, redactor: Redactor) 
 
     fields = _base_fields(finding)
     fields["snippet"] = redactor.redact(snippet)
+    fields["precedent"] = redactor.redact(_precedent(exceptions, finding))
     return _read_prompt("explain.txt").format(**fields)
 
 
@@ -150,6 +179,7 @@ def build_patch_prompt(
     workspace: Path,
     redactor: Redactor,
     failure_reason: str | None = None,
+    exceptions: ExceptionStore | None = None,
 ) -> str:
     """Prompt for a corrected file. Raises `ContextError` rather than guessing."""
     content = read_workspace_file(workspace, finding)
@@ -167,4 +197,5 @@ def build_patch_prompt(
     fields = _base_fields(finding)
     fields["file_content"] = redactor.redact(content)
     fields["retry_block"] = retry_block
+    fields["precedent"] = redactor.redact(_precedent(exceptions, finding))
     return _read_prompt("patch.txt").format(**fields)

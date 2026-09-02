@@ -9,6 +9,7 @@ from plimsoll.core.context import (
     extract_block,
     resolve_file,
 )
+from plimsoll.core.exceptions import ExceptionEntry, ExceptionStore
 from plimsoll.core.models import CheckSource, Finding, Severity
 from plimsoll.core.redaction import Redactor
 
@@ -141,3 +142,40 @@ def test_explain_degrades_when_the_file_is_missing(workspace):
     prompt = build_explain_prompt(finding(file=Path("gone.tf")), workspace, Redactor())
     assert "(source unavailable)" in prompt
     assert "S3 bucket is public" in prompt
+
+
+def _store_with(**entry_overrides: object) -> ExceptionStore:
+    base = dict(
+        rule_class="s3.acl.public",
+        resource_address="aws_s3_bucket.other",
+        justification="legacy bucket, migration tracked in JIRA-1",
+        approved_by="alice",
+    )
+    base.update(entry_overrides)
+    return ExceptionStore([ExceptionEntry(**base)])
+
+
+def test_patch_prompt_cites_prior_accepted_exceptions_for_the_same_rule_class(workspace):
+    prompt = build_patch_prompt(finding(), workspace, Redactor(), exceptions=_store_with())
+    assert "aws_s3_bucket.other" in prompt
+    assert "legacy bucket, migration tracked in JIRA-1" in prompt
+    assert "alice" in prompt
+
+
+def test_patch_prompt_omits_precedent_for_a_different_rule_class(workspace):
+    store = _store_with(rule_class="iam.wildcard.action")
+    prompt = build_patch_prompt(finding(), workspace, Redactor(), exceptions=store)
+    assert "aws_s3_bucket.other" not in prompt
+
+
+def test_patch_prompt_says_nothing_when_no_store_is_given(workspace):
+    prompt = build_patch_prompt(finding(), workspace, Redactor())
+    assert "accepted as an exception elsewhere" not in prompt
+
+
+def test_explain_prompt_cites_prior_accepted_exceptions_for_the_same_rule_class(workspace):
+    prompt = build_explain_prompt(finding(), workspace, Redactor(), exceptions=_store_with())
+    assert "aws_s3_bucket.other" in prompt
+    assert "accepted as an exception elsewhere" in prompt
+    # The instruction against suggesting an exception still stands alongside the precedent.
+    assert "Do not suggest suppressing" in prompt

@@ -122,8 +122,6 @@ Expect something here to be wrong. Three of those five have never executed.
 
 ## 4. Smaller, and genuinely optional
 
-- [ ] **Exception precedent in prompts.** The store exists; `core/context.py` does not yet
-      cite prior accepted exceptions. The last unticked box in Phase 3.
 - [ ] **A third-party known-good corpus** for false-positive measurement.
       `tests/test_rule_corpus.py` asserts continuously against our own fixtures — a
       stronger guarantee than a sampled percentage, but still our own opinion of correct.

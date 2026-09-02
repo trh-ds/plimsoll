@@ -11,7 +11,7 @@ Location: {location}
 
 Checker message:
 {message}
-{retry_block}
+{precedent}{retry_block}
 Full current content of {file}:
 ```hcl
 {file_content}

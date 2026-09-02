@@ -68,7 +68,7 @@ because the AWS provider will not plan at all until `sts:GetCallerIdentity` succ
 
 - [x] `LLMProvider` protocol; `null` provider first, so tests exist before real providers
 - [x] `llm/openai_compat.py` — one adapter reaches every endpoint that matters, so the planned `ollama` and `anthropic` modules were not needed
-- [x] `core/context.py` — HCL block extraction *(rule text, docs cache, and exception precedent wait on the rule pack and the exception store)*
+- [x] `core/context.py` — HCL block extraction, exception precedent *(rule text and a docs cache were never built; not tracked as remaining work)*
 - [x] `llm/prompts/explain.txt`
 - [x] `llm/prompts/patch.txt` — whole-file output, strict constraints *(revised from unified diff)*
 - [x] Output validation before verification — empty and unchanged rejected, wrapping fence stripped
@@ -97,7 +97,7 @@ because the AWS provider will not plan at all until `sts:GetCallerIdentity` succ
 - [x] `core/exceptions.py` — YAML store, exact rule match, glob address match
 - [x] Expiry handling with a distinct `EXPIRED_EXCEPTION` report state
 - [x] `plimsoll exceptions` subcommands: list, add, expire, prune
-- [ ] Exception precedent flows into `ContextBuilder` — the store exists; the prompt does not yet cite prior accepted exceptions
+- [x] Exception precedent flows into `ContextBuilder` — filtered on rule class, redacted like everything else in a prompt
 - [x] `core/redaction.py` — secret patterns, applied before prompts *(pulled into Phase 2: hosted inference made it a prerequisite rather than a Phase 3 nicety)*
 - [x] ~~Apply redaction before serialisation too~~ — redaction moved *earlier* instead. `Finding.message` and `Finding.raw` are redacted by the model's validator at construction, so there is no path on which an unredacted finding exists. Doing it at the serialisation boundary would have left the secret in memory and in the terminal report.
 - [x] `core/provenance.py` — record assembly, canonical JSON, SHA-256 content hash
@@ -110,7 +110,7 @@ because the AWS provider will not plan at all until `sts:GetCallerIdentity` succ
 
 **Done when:** a run against a fixture with one accepted exception and three live findings produces a stable, hash-verified provenance record with the exception correctly attributed, and no secret survives redaction.
 
-**Status: done**, except for exception precedent reaching the prompt.
+**Status: done.**
 
 ---
 

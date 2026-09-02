@@ -179,7 +179,6 @@ Not done:
 |---|---|
 | **The numbers** | The harness exists and nothing has been run. There is no measured pass rate anywhere, and there must not be one until there is |
 | A live provider run | Every path is tested against scripted providers and recorded payloads. That is not the same as having talked to a real router |
-| Exception precedent in prompts | The store exists; the prompt doesn't yet cite prior accepted exceptions |
 | A PyPI release | The publish workflow is ready; the name isn't reserved |
 
 Roughly: **4,400 lines of Python and 1,200 of Rego; 399 unit tests, 10 that shell out to

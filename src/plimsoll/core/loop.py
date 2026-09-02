@@ -178,7 +178,7 @@ class VerifierLoop:
     def _explain(self, workspace: Path, finding: Finding, redactor: Redactor) -> str | None:
         assert self._provider is not None
         try:
-            prompt = build_explain_prompt(finding, workspace, redactor)
+            prompt = build_explain_prompt(finding, workspace, redactor, self._exceptions)
             return redactor.restore(self._provider.complete(prompt)).strip()
         except (LLMError, ContextError) as exc:
             # An explanation is a convenience. Losing it must not lose the finding.
@@ -207,7 +207,9 @@ class VerifierLoop:
                 break
             attempts = attempt
             try:
-                prompt = build_patch_prompt(finding, workspace, redactor, failure_reason)
+                prompt = build_patch_prompt(
+                    finding, workspace, redactor, failure_reason, self._exceptions
+                )
                 raw = self._provider.complete(prompt)
                 patch = build_patch(
                     workspace,
