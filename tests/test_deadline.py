@@ -63,8 +63,12 @@ class SlowCheck:
 
 
 def test_the_gate_stops_at_the_seam_and_marks_the_result(tmp_path):
-    first, second = SlowCheck("first"), SlowCheck("second")
-    result = Gate([first, second]).run(tmp_path, GateConfig(), Deadline(0.01))
+    # The deadline must survive per-run setup (a real TemporaryDirectory, a real
+    # CheckContext) without expiring before the first check gets a turn, so it needs
+    # more headroom than a bare 10ms under a loaded machine -- but still far short of
+    # a check's own sleep, so the second check is skipped once the first burns it.
+    first, second = SlowCheck("first", 0.3), SlowCheck("second", 0.3)
+    result = Gate([first, second]).run(tmp_path, GateConfig(), Deadline(0.05))
 
     assert first.runs == 1
     assert second.runs == 0
