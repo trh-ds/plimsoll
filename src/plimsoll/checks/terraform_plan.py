@@ -101,6 +101,46 @@ def parse_plan_output(stream: str) -> list[Finding]:
     return [_finding_from_diagnostic(d) for d in parse_plan_diagnostics(stream)]
 
 
+# The AWS SDK's ways of saying "I do not accept who you are". Matched only on
+# diagnostics addressed to a provider block, so a resource that merely mentions a token
+# is never mistaken for one.
+_CREDENTIAL_FAILURE = re.compile(
+    r"InvalidClientTokenId|ExpiredToken|SignatureDoesNotMatch|UnrecognizedClientException"
+    r"|No valid credential sources|validating provider credentials",
+    re.IGNORECASE,
+)
+
+
+def credential_failure(stream: str) -> str | None:
+    """The summary of a provider-level credential rejection in this stream, or None.
+
+    With real-looking credentials in the environment, the override in `terraform_cli`
+    is rightly not written, and if AWS rejects them -- expired, revoked, wrong partition
+    -- the plan fails before any resource is considered. That is a fact about the runner.
+    Reported as a finding, it became a HIGH violation pinned to the `provider` line of a
+    configuration that had nothing wrong with it, and the Rego pack quietly skipped.
+
+    Other provider-level diagnostics stay findings: an invalid region or a malformed
+    `assume_role` block is the configuration's fault.
+    """
+    for diagnostic in parse_plan_diagnostics(stream):
+        if not str(diagnostic.get("address") or "").startswith("provider["):
+            continue
+        summary = str(diagnostic.get("summary") or "").strip()
+        if _CREDENTIAL_FAILURE.search(f"{summary} {diagnostic.get('detail') or ''}"):
+            return summary
+    return None
+
+
+def _credential_failure_message(summary: str) -> str:
+    return (
+        "AWS rejected the credentials in this environment, so terraform could not plan "
+        "and nothing plan-based was verified. This is a problem with the runner, not your "
+        "configuration. Fix them, or unset AWS_ACCESS_KEY_ID and AWS_PROFILE so plimsoll "
+        f"plans with placeholders and needs no AWS account: {summary[:300]}"
+    )
+
+
 class PlanArtifacts:
     """What one plan run produced. Held in `CheckContext` so it is produced once."""
 
@@ -135,6 +175,9 @@ def _plan(ctx: CheckContext) -> PlanArtifacts:
     )
     diagnostics = completed.stdout or ""
     if completed.returncode != 0 or not plan_file.exists():
+        rejected = credential_failure(diagnostics)
+        if rejected is not None:
+            raise CheckExecutionError(_credential_failure_message(rejected))
         return PlanArtifacts(None, diagnostics)
 
     shown = terraform_cli.run_terraform(ctx, ["show", "-json", str(plan_file)])
