@@ -1,0 +1,26 @@
+# Hooks for https://pre-commit.com. In a repository's .pre-commit-config.yaml:
+#
+#   - repo: https://github.com/trh-ds/plimsoll
+#     rev: v0.1.0
+#     hooks:
+#       - id: plimsoll-scan
+#         args: [infra/]      # the Terraform directory; defaults to the repository root
+#
+# `pass_filenames: false` because the gate judges a configuration, not a file: terraform
+# merges every .tf in a directory, and a rule like "this bucket has no public access
+# block" is about two resources that may live in two files. Handing it only the files
+# that changed would produce findings that are wrong in both directions.
+#
+# Only `scan`. A commit hook that sends source to a model on every commit is not one
+# anybody would leave installed, and `verify` belongs in CI where the run is recorded.
+# terraform, opa, and checkov come from PATH; whichever are missing are reported and
+# skipped, exactly as on the command line.
+- id: plimsoll-scan
+  name: plimsoll scan
+  description: Check Terraform against the deterministic policy gate. No model is involved.
+  entry: plimsoll scan
+  language: python
+  files: \.(tf|tfvars)$|^\.plimsoll/
+  pass_filenames: false
+  args: ["."]
+  require_serial: true
