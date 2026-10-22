@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from plimsoll.checks.terraform_plan import (
+    credential_failure,
     parse_plan_diagnostics,
     parse_plan_output,
     plan_provider,
@@ -94,3 +95,39 @@ def test_an_empty_or_unparseable_stream_is_empty(text):
 def test_the_plan_provider_returns_none_without_terraform(monkeypatch, tmp_path):
     monkeypatch.setattr("plimsoll.checks.terraform_cli.executable", lambda: None)
     assert plan_provider(CheckContext(tmp_path, CheckConfig())) is None
+
+
+def test_rejected_credentials_are_recognised_as_the_runner_not_the_configuration():
+    summary = credential_failure(stream("rejected_credentials"))
+    assert summary is not None
+    assert "InvalidClientTokenId" in summary
+
+
+def test_a_configuration_diagnostic_is_not_mistaken_for_a_credential_failure():
+    assert credential_failure(stream("provider_diagnostics")) is None
+    assert credential_failure(stream("insecure_s3")) is None
+
+
+def test_only_provider_scoped_diagnostics_count_as_credential_failures():
+    # The same words on a resource are something the configuration said, not the SDK.
+    line = (
+        '{"type": "diagnostic", "diagnostic": {"severity": "error", '
+        '"summary": "ExpiredToken in tag value", "address": "aws_s3_bucket.b"}}'
+    )
+    assert credential_failure(line) is None
+
+
+def test_a_credential_failure_fails_the_check_instead_of_reporting_a_finding(monkeypatch, tmp_path):
+    import subprocess
+
+    from plimsoll.checks import terraform_cli
+    from plimsoll.checks.terraform_plan import TerraformPlanCheck
+    from plimsoll.core.gate import CheckExecutionError
+
+    def fake_run(ctx, args, **_):
+        return subprocess.CompletedProcess(args, 1, stream("rejected_credentials"), "")
+
+    monkeypatch.setattr(terraform_cli, "run_terraform", fake_run)
+    ctx = CheckContext(tmp_path, CheckConfig(), scratch=tmp_path)
+    with pytest.raises(CheckExecutionError, match="rejected the credentials"):
+        TerraformPlanCheck().run(ctx)
