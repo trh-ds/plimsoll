@@ -106,8 +106,10 @@ jobs:
       - name: Dogfood -- the violating corpus must block a merge
         run: |
           set -uo pipefail
-          uv run plimsoll scan tests/fixtures/rules/violating --strict --format sarif > violating.sarif
-          status=$?
+          # `&& || ` rather than reading `$?` on the next line: Actions runs this under
+          # `bash -e`, which ends the step at the expected exit 1 before `$?` is read.
+          uv run plimsoll scan tests/fixtures/rules/violating --strict --format sarif \
+            > violating.sarif && status=0 || status=$?
           # Exit 1 is the contract: findings at or above the threshold. Exit 0 means the
           # rule pack stopped firing, and exit 3 means nothing ran -- both are failures
           # here, and both would read as success to `set -e` alone.
