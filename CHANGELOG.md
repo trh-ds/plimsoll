@@ -260,11 +260,10 @@ for what is a contract and what is not.
   Request construction, response parsing, and every failure path are tested against
   recorded payloads with no socket opened, per the no-network-in-unit-tests rule. That is
   not the same as having talked to a real router.
-- **The GitHub Action's image has never been built.** Docker was unavailable on the
-  machine it was written on, and on the next one Docker Hub rate-limited the base image
-  and the build containers had no route to the package mirrors. The wiring is asserted by `tests/test_action.py` and the
-  image is built and driven by the `action-image` job in `integration.yml`, which will be
-  the first thing to have run it.
+- **The GitHub Action has not run on a real pull request.** Its image builds in the
+  `action-image` job of `integration.yml`, where `doctor` finds all four adapters and the
+  entrypoint writes every report; that is the whole of its verification so far. It is not
+  published to the Marketplace and has no `v0` tag to reference.
 - Redaction is pattern-based, so it is a mitigation and not a guarantee. A credential in
   a shape none of the patterns match will be transmitted.
 - `rule_map.py` covers only the checkov IDs verified against real output. Everything else

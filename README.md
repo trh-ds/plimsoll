@@ -78,7 +78,7 @@ If the model hallucinates a resource type, scopes an ARN wrong, or fixes one fin
 | Per-repository config, `.plimsoll/config.yaml` | **Built** |
 | `--strict`: fail unless every check ran | **Built** |
 | pre-commit hook | **Built**, unreleased |
-| GitHub Action | **Built**, unreleased; the image has not been built yet |
+| GitHub Action | **Built**, unreleased; image built and driven in CI |
 | Benchmark harness and scenario set | **Built** |
 | Published benchmark numbers | **Not measured** |
 

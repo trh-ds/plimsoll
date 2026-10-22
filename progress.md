@@ -422,8 +422,8 @@ inputs for all of them. Nine checkov IDs mapped from a real capture of the rule 
 - `registry.terraform.io` was blocked on this machine; a filesystem mirror of
   `hashicorp/aws` 5.100.0 from `releases.hashicorp.com` got terraform through. Docker
   started, but Docker Hub rate-limited the base image, and with a mirror of the same
-  digest the build containers still could not resolve the Debian mirrors. **The image is
-  still unbuilt.**
+  digest the build containers still could not resolve the Debian mirrors. It was
+  first built in CI on the pull request instead, and passed.
 
 **Decisions:**
 - *Suppression moves findings, never deletes them.* `GateResult.suppressed` holds every
@@ -438,8 +438,7 @@ inputs for all of them. Nine checkov IDs mapped from a real capture of the rule 
 - *`--strict` is opt-in on the CLI and on by default in the Action.* A laptop without
   checkov is normal; an Action image without it is broken.
 
-**Next:** unchanged at the top — run the benchmark against a live model. Then the image
-build, on a runner with Docker Hub access.
+**Next:** unchanged at the top — run the benchmark against a live model.
 
 **Exit criterion:** ten lines of workflow YAML in an unrelated repo produce a useful PR comment. **Built, not demonstrated** — see below.
 
@@ -599,7 +598,7 @@ by a test.
 
 _Nothing blocked._
 
-Three things are **unverified rather than blocked**, each needing something this machine
-does not have: a live model endpoint, a working Docker daemon, and a free-tier API key.
-They are the benchmark run, the Action image build, and the first real provider call.
+Two things are **unverified rather than blocked**, each needing a live model endpoint
+and a free-tier API key: the benchmark run and the first real provider call. The Action
+image, the third, has since been built and driven in CI.
 Nothing depends on them to continue; everything depends on them to be believed.
