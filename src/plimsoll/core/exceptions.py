@@ -33,7 +33,13 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from plimsoll.core.models import ExceptionRef, Finding
+from plimsoll.core.models import (
+    ExceptionRef,
+    Finding,
+    GateResult,
+    SuppressedFinding,
+    SuppressionKind,
+)
 
 STORE_RELATIVE_PATH = Path(".plimsoll") / "exceptions.yaml"
 SCHEMA_VERSION = "0.1"
@@ -141,6 +147,37 @@ class ExceptionStore:
         target.write_text(dump_entries(self.entries), encoding="utf-8")
         self.path = target
         return target
+
+
+def suppress_exempted(
+    result: GateResult, store: ExceptionStore, today: date | None = None
+) -> list[ExceptionRef]:
+    """Apply live exceptions to a `scan` result, in place. Returns the lapsed ones.
+
+    `verify` does not use this: its loop records an `EXEMPTED` decision per finding,
+    which is what provenance reads. `scan` has no decisions, and before this existed it
+    ignored the store entirely -- a violation a reviewer had signed off on still failed
+    the build, which is the alert fatigue the store exists to prevent.
+
+    An expired match stays a counted finding. It is returned so the report can say the
+    sign-off lapsed rather than presenting the finding as though nobody had looked.
+    """
+    kept: list[Finding] = []
+    lapsed: list[ExceptionRef] = []
+    for finding in result.findings:
+        ref = store.match(finding, today)
+        if ref is not None and not ref.expired:
+            result.suppressed.append(
+                SuppressedFinding(
+                    finding=finding, kind=SuppressionKind.EXCEPTION, exception_ref=ref
+                )
+            )
+            continue
+        if ref is not None:
+            lapsed.append(ref)
+        kept.append(finding)
+    result.findings = kept
+    return lapsed
 
 
 def parse_entries(payload: object, path: Path) -> list[ExceptionEntry]:

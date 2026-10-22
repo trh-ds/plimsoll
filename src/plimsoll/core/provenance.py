@@ -46,6 +46,7 @@ from plimsoll.core.models import (
     PatchVerification,
     Severity,
     SkippedCheck,
+    SuppressionKind,
     ToolVersion,
     VerifyResult,
 )
@@ -396,9 +397,18 @@ def gate_as_verify_result(result: GateResult, fail_on: Severity) -> VerifyResult
     """
     from plimsoll.core.loop import untried_status
 
+    # Exempted findings stay in the record, as `verify` keeps them: who accepted a
+    # violation is exactly what an auditor reads this file for. Baselined ones do not --
+    # a snapshot nobody reviewed is not a decision, and recording it as one would be.
+    exempted = [
+        Decision(finding=s.finding, status=DecisionStatus.EXEMPTED, exception_ref=s.exception_ref)
+        for s in result.suppressed
+        if s.kind is SuppressionKind.EXCEPTION
+    ]
     return VerifyResult(
         gate=result,
-        decisions=[Decision(finding=f, status=untried_status(f, fail_on)) for f in result.findings],
+        decisions=[Decision(finding=f, status=untried_status(f, fail_on)) for f in result.findings]
+        + exempted,
         llm_unavailable_reason="scan does not use a model",
         timed_out=result.timed_out,
     )

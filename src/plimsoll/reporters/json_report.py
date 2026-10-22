@@ -25,11 +25,13 @@ def build_payload(result: GateResult, *, fail_on: Severity) -> dict[str, Any]:
             "checks_ran": [t.name for t in result.tooling],
             "checks_skipped": len(result.checks_skipped),
             "checks_failed": len(result.checks_failed),
+            "suppressed": len(result.suppressed),
         },
         "tooling": [t.model_dump(mode="json") for t in result.tooling],
         "checks_skipped": [s.model_dump(mode="json") for s in result.checks_skipped],
         "checks_failed": [f.model_dump(mode="json") for f in result.checks_failed],
         "findings": [f.model_dump(mode="json") for f in result.findings],
+        "suppressed": [s.model_dump(mode="json") for s in result.suppressed],
     }
 
 

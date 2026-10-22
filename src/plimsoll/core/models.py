@@ -105,6 +105,32 @@ def compute_finding_id(
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
 
 
+def compute_fingerprint(
+    *,
+    rule_class: str,
+    resource_address: str,
+    file: Path,
+    rule_id: str,
+    line_start: int,
+) -> str:
+    """Identity of a violation that survives unrelated edits to the file it is in.
+
+    `Finding.id` includes the line, which it needs to (see `compute_finding_id`), and so
+    changes every time someone adds a line above the resource. That is the wrong key for
+    anything that must outlive a commit: a baseline of accepted findings, or a SARIF
+    fingerprint code scanning uses to decide an alert is the same alert. Keyed instead on
+    what the violation *is* -- which rule, on which resource, in which file -- and on the
+    tool's own rule id, so checkov and the Rego pack reporting one class stay distinct.
+
+    A finding with no resource address has nothing else to anchor it, so its line stays
+    in. Such a finding drifting back to "new" fails closed, which is the right direction.
+    """
+    parts = [rule_class, resource_address, file.as_posix()]
+    if not resource_address:
+        parts += [rule_id, str(line_start)]
+    return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()[:16]
+
+
 def _redact_deep(value: object) -> object:
     """Redact every string inside a nested tool payload."""
     if isinstance(value, str):
@@ -157,6 +183,16 @@ class Finding(BaseModel):
                 line_start=self.line_start,
             )
         return self
+
+    @property
+    def fingerprint(self) -> str:
+        return compute_fingerprint(
+            rule_class=self.rule_class,
+            resource_address=self.resource_address,
+            file=self.file,
+            rule_id=self.rule_id,
+            line_start=self.line_start,
+        )
 
     @model_validator(mode="after")
     def _redact(self) -> Finding:
@@ -342,6 +378,28 @@ class GateConfig(BaseModel):
 
     fail_on: Severity = Severity.HIGH
     check: CheckConfig = Field(default_factory=CheckConfig)
+    # Fingerprints of findings that already existed when the baseline was taken. Part of
+    # the gate's config rather than a step after it, so a patch is re-verified against
+    # the same baseline the finding was produced under (invariant 2).
+    baseline: frozenset[str] = frozenset()
+
+
+class SuppressionKind(StrEnum):
+    EXCEPTION = "exception"
+    BASELINE = "baseline"
+
+
+class SuppressedFinding(BaseModel):
+    """A finding that does not count toward the exit code, and why.
+
+    Moved out of `GateResult.findings` rather than deleted. A suppressed finding is still
+    a violation in the code, and every report says how many there are and why each is
+    there: hiding them is how a baseline turns into a place debt goes to be forgotten.
+    """
+
+    finding: Finding
+    kind: SuppressionKind
+    exception_ref: ExceptionRef | None = None
 
 
 class GateResult(BaseModel):
@@ -355,6 +413,7 @@ class GateResult(BaseModel):
     tooling: list[ToolVersion] = Field(default_factory=list)
     checks_skipped: list[SkippedCheck] = Field(default_factory=list)
     checks_failed: list[FailedCheck] = Field(default_factory=list)
+    suppressed: list[SuppressedFinding] = Field(default_factory=list)
     # The run hit `--timeout` and stopped at a seam. Whatever is below is partial, so the
     # CLI exits 4 and never 0 -- partial verification is not verification.
     timed_out: bool = False
@@ -366,6 +425,17 @@ class GateResult(BaseModel):
 
     def findings_at_or_above(self, threshold: Severity) -> list[Finding]:
         return [f for f in self.findings if f.severity.meets(threshold)]
+
+    def suppression_summary(self) -> str | None:
+        """ "3 suppressed (2 by exception, 1 by baseline)", or None when nothing was."""
+        if not self.suppressed:
+            return None
+        parts = [
+            f"{count} by {kind.value}"
+            for kind in SuppressionKind
+            if (count := sum(1 for s in self.suppressed if s.kind is kind))
+        ]
+        return f"{len(self.suppressed)} suppressed ({', '.join(parts)})"
 
 
 class VerifyResult(BaseModel):
