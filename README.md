@@ -10,13 +10,11 @@ Plimsoll runs in CI between your AI coding agent and your cloud account. It find
 
 > ### Status: pre-alpha. Not installable yet.
 >
-> This README describes the design. Some of it is built and some of it is not, and the
-> difference is tracked honestly in **[Where this actually is](#where-this-actually-is)**
-> below and in [`CHANGELOG.md`](CHANGELOG.md). There is no release and no PyPI package.
->
-> `plimsoll scan`, `plimsoll verify`, `plimsoll explain`, and `plimsoll doctor` all run
-> from a checkout today. What is missing is the bundled rule pack, the exception store,
-> and provenance records.
+> Every command below runs from a checkout today, and the deterministic gate has been run
+> end to end against real `terraform`, `opa`, and `checkov` together. There is no release
+> and no PyPI package yet, and the reasoning loop has not been benchmarked against a live
+> model. What is and is not done is tracked in
+> **[Where this actually is](#where-this-actually-is)** and [`CHANGELOG.md`](CHANGELOG.md).
 
 ---
 
@@ -75,8 +73,12 @@ If the model hallucinates a resource type, scopes an ARN wrong, or fixes one fin
 | Exception store, `plimsoll exceptions list \| add \| expire \| prune` | **Built** |
 | Provenance records, `--provenance`, published JSON Schema | **Built** |
 | Whole-run timeout and exit code 4 | **Built** |
-| Terminal, JSON, SARIF, and PR-comment output | **Built** |
-| GitHub Action | **Built**, unreleased |
+| Terminal, JSON, SARIF, JUnit XML, and PR-comment output | **Built** |
+| Baselines for existing repositories, `plimsoll baseline` | **Built** |
+| Per-repository config, `.plimsoll/config.yaml` | **Built** |
+| `--strict`: fail unless every check ran | **Built** |
+| pre-commit hook | **Built**, unreleased |
+| GitHub Action | **Built**, unreleased; the image has not been built yet |
 | Benchmark harness and scenario set | **Built** |
 | Published benchmark numbers | **Not measured** |
 
@@ -175,21 +177,75 @@ uv run plimsoll explain tests/fixtures/insecure_s3   # prose only, no patches
 `verify` never writes to your workspace. Patches are applied to a temporary copy and
 re-run through the same checks; only fixes that pass are printed.
 
-Shared flags: `--fail-on`, `--format terminal|json|sarif|github`, `--report FORMAT=PATH`,
-`--policy-dir`, `--provenance`, `--generated-by`, `--timeout` (whole run, 600s) and
-`--check-timeout` (one subprocess, 120s). `verify` adds `--no-llm`, `--max-retries`, and
-`--max-llm-findings`.
-
-Accepted violations go in `.plimsoll/exceptions.yaml`, managed with
-`plimsoll exceptions list | add | expire | prune`. A matched, live exception is never sent
-to a model — it does not cost a token and does not leave the machine. An expired one is
-reported as lapsed rather than silently re-raised.
+Shared flags: `--fail-on`, `--format terminal|json|sarif|github|junit`,
+`--report FORMAT=PATH`, `--policy-dir`, `--provenance`, `--generated-by`, `--baseline`,
+`--strict`, `--config`, `--timeout` (whole run, 600s) and `--check-timeout` (one
+subprocess, 120s). `verify` adds `--no-llm`, `--max-retries`, and `--max-llm-findings`.
 
 Exit codes: **0** clean, **1** findings at or above `--fail-on` remain, **2** config
-error, **3** no check could run, **4** the run exceeded `--timeout`. With no checker
-installed it exits 3 and says nothing was verified, rather than reporting a clean pass;
-a run that timed out exits 4 and never exits 0, because partial verification is not
-verification.
+error, **3** no check could run (or, under `--strict`, not every check did), **4** the run
+exceeded `--timeout`. With no checker installed it exits 3 and says nothing was verified,
+rather than reporting a clean pass; a run that timed out exits 4 and never exits 0,
+because partial verification is not verification.
+
+### Adopting it on a repository that already has findings
+
+Three mechanisms, for three different situations. Every report still counts what each one
+held back, so suppressed debt stays visible instead of disappearing.
+
+**A baseline** is for the first day. Record what is there, commit the file, and from then
+on only what a change *introduces* fails the build:
+
+```bash
+plimsoll baseline ./infra                # writes ./infra/.plimsoll/baseline.json
+plimsoll scan ./infra --baseline ./infra/.plimsoll/baseline.json
+```
+
+Entries key on rule, resource, and file, not line number, so editing around a baselined
+resource does not bring it back. A baseline is a snapshot nobody reviewed, so it is never
+recorded as an approval in provenance.
+
+**An exception** is for a violation someone has looked at and accepted. It goes in
+`.plimsoll/exceptions.yaml` with a justification, an approver, and optionally an expiry,
+managed with `plimsoll exceptions list | add | expire | prune`. `scan` and `verify` both
+honour it; a matched, live exception is never sent to a model, and an expired one is
+reported as lapsed rather than silently re-raised.
+
+**A config file** at `.plimsoll/config.yaml` sets the defaults a repository wants, so CI,
+a pre-commit hook, and a terminal judge it the same way. A flag still wins. Unknown keys
+are an error, because a misspelt `fail_on` that was silently ignored would leave the gate
+at a threshold nobody chose.
+
+```yaml
+version: "0.1"
+fail_on: medium
+baseline: .plimsoll/baseline.json   # paths are relative to the workspace
+strict: true
+check_timeout: 300
+```
+
+### CI and pre-commit
+
+`--format junit` (or `--report junit=plimsoll.xml`) produces a JUnit report for GitLab,
+Jenkins, Azure Pipelines, and CircleCI; blocking findings are failures, everything else
+passes or is skipped with its reason, and a check that could not run is an error rather
+than an empty, green suite. `--format sarif` is for GitHub code scanning; suppressed
+findings carry SARIF's own `suppressions`, and results carry a line-independent
+fingerprint so alerts do not reopen when unrelated lines move.
+
+`--strict` makes a run exit 3 unless every check ran. Locally a missing `checkov` is
+reported and skipped; in CI, where the toolchain is supposed to be complete, it is
+usually a broken image. The Action turns it on by default.
+
+As a [pre-commit](https://pre-commit.com) hook, scan only, never the model:
+
+```yaml
+- repo: https://github.com/trh-ds/plimsoll
+  rev: v0.1.0
+  hooks:
+    - id: plimsoll-scan
+      args: [infra/]
+```
 
 ## Design commitments
 

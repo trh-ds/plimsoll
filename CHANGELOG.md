@@ -125,8 +125,53 @@ for what is a contract and what is not.
   the slow tests, `opa test`, a SARIF schema validation, and Plimsoll against its own
   corpus; the second publishes to PyPI on tag via trusted publishing, with no stored
   token.
+- **Baselines** (`core/baseline.py`, `plimsoll baseline`, `--baseline`) — record the
+  findings a repository already has, so adopting the gate fails only on what a change
+  introduces. Applied inside `Gate.run`, so a patch is re-verified under the same
+  baseline. Never recorded in provenance as a decision.
+- **`Finding.fingerprint`** — rule class, resource, and file, without the line number, so
+  it survives edits. Keys baselines, and is published in SARIF as
+  `partialFingerprints["plimsollFingerprint/v1"]` so code-scanning alerts stop reopening
+  when unrelated lines move.
+- **`GateResult.suppressed`** — findings held back by an exception or a baseline move here
+  with their reason instead of disappearing. Every reporter counts them; SARIF marks them
+  with its own `suppressions`.
+- **`.plimsoll/config.yaml`** (`core/config.py`, `--config`) — per-repository defaults for
+  `fail_on`, timeouts, `policy_dir`, `baseline`, `strict`, and the loop limits. A flag
+  still wins. Unknown keys are an error.
+- **`--strict`** — exit 3 unless every check ran, for CI that must not pass on a partial
+  toolchain. On by default in the Action, whose image ships every tool.
+- **JUnit XML reporter** (`--format junit`, `--report junit=PATH`) for GitLab, Jenkins,
+  Azure Pipelines, and CircleCI. Blocking findings are failures; a check that could not
+  run is an error, never an empty green suite.
+- **pre-commit hook** (`.pre-commit-hooks.yaml`) — `plimsoll-scan`, deterministic only.
+- **Action inputs** `config`, `baseline`, and `strict`, and a `suppressed` output.
+- **Nine more checkov mappings** — security group, RDS, EBS, IAM trust, admin attachment,
+  and provider credentials, read off a real capture against the rule corpus and matched
+  to the Rego finding on the same resource. Cross-tool deduplication on that corpus went
+  from 5 merged violations to 14. A test now enforces that every mapped ID appears in a
+  captured fixture.
 
 ### Fixed
+
+- **`scan` ignored `.plimsoll/exceptions.yaml`.** Only `verify` applied it, so a violation
+  a reviewer had signed off on still failed `scan` in CI. `scan` now honours live
+  exceptions, names expired ones, and records exempted findings in provenance as `EXEMPTED`
+  decisions.
+- **Rejected AWS credentials were reported as a HIGH policy finding.** With real-looking
+  credentials present the placeholder override is rightly skipped, and when AWS refuses
+  them `terraform plan` fails on `sts:GetCallerIdentity`. The adapter turned that into a
+  violation on the `provider` line while the Rego pack quietly skipped. It is now a failed
+  check with a message that says how to fix the runner.
+- **The rule corpus test could not see the Rego pack once checkov was installed.**
+  Deduplication keeps checkov's copy of a shared violation and records OPA in
+  `also_reported_by`, which the test ignored; five rule classes looked silent, and a false
+  positive on the compliant corpus could have hidden the same way.
+- **The Action overrode the repository's config.** It passed `--fail-on`, `--timeout`, and
+  `--check-timeout` on every run; those inputs now default to empty.
+- **SARIF `informationUri` named an organisation this project does not own.**
+- **Checkov's `aws.default` and the pack's `provider.aws` were two findings** for one
+  hardcoded key in a provider block. The adapter normalises checkov's form.
 
 - **`terraform_validate` no longer reports an uninitialized workspace as a finding.**
   Without `terraform init` there is no provider schema, so terraform returns only
@@ -216,13 +261,17 @@ for what is a contract and what is not.
   recorded payloads with no socket opened, per the no-network-in-unit-tests rule. That is
   not the same as having talked to a real router.
 - **The GitHub Action's image has never been built.** Docker was unavailable on the
-  machine it was written on. The wiring is asserted by `tests/test_action.py` and the
+  machine it was written on, and on the next one Docker Hub rate-limited the base image
+  and the build containers had no route to the package mirrors. The wiring is asserted by `tests/test_action.py` and the
   image is built and driven by the `action-image` job in `integration.yml`, which will be
   the first thing to have run it.
 - Redaction is pattern-based, so it is a mitigation and not a guarantee. A credential in
   a shape none of the patterns match will be transmitted.
 - `rule_map.py` covers only the checkov IDs verified against real output. Everything else
   is reported unclassified, at a severity below the default threshold.
+- **A baseline is not recorded in provenance.** Baselined findings appear in every report
+  but not as decisions in the record, because a snapshot nobody reviewed is not a
+  decision. An auditor reading only the record will not see them.
 - **The twenty rule classes and their severities encode security judgement** and have not
   been reviewed by a second person. They are the thing a user is trusting.
 - **`verify` re-initialises terraform once per patch attempt.** `TF_PLUGIN_CACHE_DIR`
