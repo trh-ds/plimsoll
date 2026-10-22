@@ -106,7 +106,7 @@ jobs:
       - name: Dogfood -- the violating corpus must block a merge
         run: |
           set -uo pipefail
-          uv run plimsoll scan tests/fixtures/rules/violating --format sarif > violating.sarif
+          uv run plimsoll scan tests/fixtures/rules/violating --strict --format sarif > violating.sarif
           status=$?
           # Exit 1 is the contract: findings at or above the threshold. Exit 0 means the
           # rule pack stopped firing, and exit 3 means nothing ran -- both are failures
@@ -128,14 +128,24 @@ jobs:
             violating.sarif
 
       - name: Dogfood -- the fixed corpus must exit clean
-        run: uv run plimsoll scan tests/fixtures/rules/compliant
+        # --strict, because without it a plan that failed and took the rule pack with it
+        # would still exit 0 here, and "clean" would mean "half of it ran".
+        run: uv run plimsoll scan tests/fixtures/rules/compliant --strict
+
+      - name: Dogfood -- a baseline of the violating corpus suppresses all of it
+        run: |
+          set -euo pipefail
+          uv run plimsoll baseline tests/fixtures/rules/violating --output "$RUNNER_TEMP/baseline.json"
+          uv run plimsoll scan tests/fixtures/rules/violating --strict \
+            --baseline "$RUNNER_TEMP/baseline.json" --report junit="$RUNNER_TEMP/plimsoll.xml"
+          python3 -c 'import sys, xml.etree.ElementTree as ET; r = ET.parse(sys.argv[1]).getroot(); assert r.get("failures") == "0" and int(r.get("skipped")) > 0, r.attrib' "$RUNNER_TEMP/plimsoll.xml"
 
       - name: Dogfood -- the documented smoke tests
         # The two commands in CLAUDE.md and the README. If the quickstart is wrong, it is
         # wrong here first rather than for the first person who tries it.
         run: |
           set -euo pipefail
-          uv run plimsoll scan ./tests/fixtures/compliant_s3
+          uv run plimsoll scan ./tests/fixtures/compliant_s3 --strict
           uv run plimsoll scan ./tests/fixtures/insecure_s3 && exit_code=0 || exit_code=$?
           if [ "$exit_code" -ne 1 ]; then
             echo "::error::expected exit 1 from insecure_s3, got $exit_code"
