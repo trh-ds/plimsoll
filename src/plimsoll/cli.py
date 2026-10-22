@@ -1,6 +1,6 @@
 """Typer entrypoint.
 
-`scan`, `verify`, `explain`, `exceptions`, and `doctor`.
+`scan`, `verify`, `explain`, `baseline`, `exceptions`, and `doctor`.
 
 Exit codes come from the gate and the decisions, never from anything a model said.
 """
@@ -9,15 +9,31 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import date
 from enum import StrEnum
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, TypeVar
 
 import typer
 
+from plimsoll.core.baseline import (
+    DEFAULT_RELATIVE_PATH as DEFAULT_BASELINE_PATH,
+)
+from plimsoll.core.baseline import (
+    Baseline,
+    BaselineError,
+    load_baseline,
+    write_baseline,
+)
+from plimsoll.core.config import ConfigError, load_project_config
 from plimsoll.core.deadline import Deadline
-from plimsoll.core.exceptions import ExceptionEntry, ExceptionStore, ExceptionStoreError
+from plimsoll.core.exceptions import (
+    ExceptionEntry,
+    ExceptionStore,
+    ExceptionStoreError,
+    suppress_exempted,
+)
 from plimsoll.core.gate import Gate, default_gate
 from plimsoll.core.loop import VerifierLoop
 from plimsoll.core.models import (
@@ -37,10 +53,12 @@ from plimsoll.llm import LLMConfig, LLMError, LLMProvider, build_provider
 from plimsoll.reporters import (
     render_github,
     render_json,
+    render_junit,
     render_sarif,
     render_terminal,
     render_verify_github,
     render_verify_json,
+    render_verify_junit,
     render_verify_sarif,
     render_verify_terminal,
 )
@@ -52,22 +70,60 @@ class ExitCode:
     CLEAN = 0
     FINDINGS = 1
     CONFIG_ERROR = 2
+    # Nothing was verified -- or, under --strict, not everything was.
     NOTHING_RAN = 3
     TIMED_OUT = 4
 
 
 DEFAULT_RUN_TIMEOUT_SECONDS = 600
 DEFAULT_CHECK_TIMEOUT_SECONDS = 120
+DEFAULT_MAX_RETRIES = 2
+DEFAULT_MAX_LLM_FINDINGS = 25
 
 _TIMEOUT_HELP = "Whole-run budget in seconds."
 _CHECK_TIMEOUT_HELP = "Per-subprocess timeout in seconds, capped by --timeout."
 _PROVENANCE_HELP = "Write the JSON provenance record for this run to PATH."
 _GENERATED_BY_HELP = "Who or what wrote this configuration. Recorded in provenance."
 _REPORT_HELP = "Also write FORMAT=PATH. Repeatable, e.g. --report sarif=out.sarif."
+_CONFIG_HELP = "Settings file. Defaults to PATH/.plimsoll/config.yaml when it exists."
+_BASELINE_HELP = "Baseline file from `plimsoll baseline`; findings in it do not fail the run."
+_STRICT_HELP = "Exit 3 unless every check ran. For CI that must not pass on a partial toolchain."
 
 ProvenanceOption = Annotated[Path | None, typer.Option("--provenance", help=_PROVENANCE_HELP)]
 GeneratedByOption = Annotated[str | None, typer.Option("--generated-by", help=_GENERATED_BY_HELP)]
 ReportOption = Annotated[list[str] | None, typer.Option("--report", help=_REPORT_HELP)]
+ConfigOption = Annotated[Path | None, typer.Option("--config", help=_CONFIG_HELP)]
+BaselineOption = Annotated[Path | None, typer.Option("--baseline", help=_BASELINE_HELP)]
+StrictOption = Annotated[bool | None, typer.Option("--strict/--no-strict", help=_STRICT_HELP)]
+FailOnOption = Annotated[
+    Severity | None,
+    typer.Option(
+        "--fail-on",
+        help="Minimum severity that sets a non-zero exit. [default: HIGH]",
+        case_sensitive=False,
+    ),
+]
+PolicyDirOption = Annotated[
+    Path | None, typer.Option("--policy-dir", help="Additional policy directory.")
+]
+TimeoutOption = Annotated[
+    int | None,
+    typer.Option("--timeout", help=f"{_TIMEOUT_HELP} [default: {DEFAULT_RUN_TIMEOUT_SECONDS}]"),
+]
+CheckTimeoutOption = Annotated[
+    int | None,
+    typer.Option(
+        "--check-timeout",
+        help=f"{_CHECK_TIMEOUT_HELP} [default: {DEFAULT_CHECK_TIMEOUT_SECONDS}]",
+    ),
+]
+MaxLlmFindingsOption = Annotated[
+    int | None,
+    typer.Option(
+        "--max-llm-findings",
+        help=f"Cap on findings sent to the model. [default: {DEFAULT_MAX_LLM_FINDINGS}]",
+    ),
+]
 
 
 class OutputFormat(StrEnum):
@@ -75,6 +131,7 @@ class OutputFormat(StrEnum):
     JSON = "json"
     SARIF = "sarif"
     GITHUB = "github"
+    JUNIT = "junit"
 
 
 # `(result, *, fail_on) -> str` for every renderer. Spelled loosely because the two tables
@@ -87,6 +144,7 @@ _GATE_RENDERERS: dict[OutputFormat, Renderer] = {
     OutputFormat.JSON: render_json,
     OutputFormat.SARIF: render_sarif,
     OutputFormat.GITHUB: render_github,
+    OutputFormat.JUNIT: render_junit,
 }
 
 _VERIFY_RENDERERS: dict[OutputFormat, Renderer] = {
@@ -94,6 +152,7 @@ _VERIFY_RENDERERS: dict[OutputFormat, Renderer] = {
     OutputFormat.JSON: render_verify_json,
     OutputFormat.SARIF: render_verify_sarif,
     OutputFormat.GITHUB: render_verify_github,
+    OutputFormat.JUNIT: render_verify_junit,
 }
 
 
@@ -154,22 +213,146 @@ app = typer.Typer(
 )
 
 
-def _exit_code(result: GateResult, fail_on: Severity) -> int:
+@dataclass(frozen=True)
+class Settings:
+    """What one run uses, after flags, `.plimsoll/config.yaml`, and defaults are merged.
+
+    Resolved in one place so `scan`, `verify`, `explain`, and `baseline` cannot disagree
+    about which source wins: a flag, then the file, then the built-in default.
+    """
+
+    fail_on: Severity
+    timeout: int
+    check_timeout: int
+    policy_dir: Path | None
+    baseline: Path | None
+    strict: bool
+    max_retries: int
+    max_llm_findings: int
+
+    def gate_config(self, baseline: frozenset[str] = frozenset()) -> GateConfig:
+        return GateConfig(
+            fail_on=self.fail_on,
+            check=CheckConfig(timeout_seconds=self.check_timeout, policy_dir=self.policy_dir),
+            baseline=baseline,
+        )
+
+
+T = TypeVar("T")
+
+
+def _pick(flag: T | None, configured: T | None, default: T) -> T:
+    if flag is not None:
+        return flag
+    return configured if configured is not None else default
+
+
+def _settings(
+    path: Path,
+    *,
+    config_file: Path | None = None,
+    fail_on: Severity | None = None,
+    timeout: int | None = None,
+    check_timeout: int | None = None,
+    policy_dir: Path | None = None,
+    baseline: Path | None = None,
+    strict: bool | None = None,
+    max_retries: int | None = None,
+    max_llm_findings: int | None = None,
+) -> Settings:
+    """Merge the sources and validate the result, or exit 2."""
+    if not path.is_dir():
+        typer.echo(f"not a directory: {path}", err=True)
+        raise typer.Exit(ExitCode.CONFIG_ERROR)
+    try:
+        project = load_project_config(path, config_file)
+    except ConfigError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(ExitCode.CONFIG_ERROR) from exc
+    return _validated(
+        Settings(
+            fail_on=_pick(fail_on, project.fail_on, Severity.HIGH),
+            timeout=_pick(timeout, project.timeout, DEFAULT_RUN_TIMEOUT_SECONDS),
+            check_timeout=_pick(
+                check_timeout, project.check_timeout, DEFAULT_CHECK_TIMEOUT_SECONDS
+            ),
+            policy_dir=policy_dir if policy_dir is not None else project.policy_dir,
+            baseline=baseline if baseline is not None else project.baseline,
+            strict=_pick(strict, project.strict, False),
+            max_retries=_pick(max_retries, project.max_retries, DEFAULT_MAX_RETRIES),
+            max_llm_findings=_pick(
+                max_llm_findings, project.max_llm_findings, DEFAULT_MAX_LLM_FINDINGS
+            ),
+        )
+    )
+
+
+def _validated(settings: Settings) -> Settings:
+    if settings.policy_dir is not None and not settings.policy_dir.is_dir():
+        typer.echo(f"policy directory does not exist: {settings.policy_dir}", err=True)
+        raise typer.Exit(ExitCode.CONFIG_ERROR)
+    for flag, value in (
+        ("--timeout", settings.timeout),
+        ("--check-timeout", settings.check_timeout),
+    ):
+        if value <= 0:
+            typer.echo(f"{flag} must be greater than zero", err=True)
+            raise typer.Exit(ExitCode.CONFIG_ERROR)
+    if settings.max_retries < 0:
+        typer.echo("--max-retries cannot be negative", err=True)
+        raise typer.Exit(ExitCode.CONFIG_ERROR)
+    if settings.max_llm_findings <= 0:
+        typer.echo("--max-llm-findings must be greater than zero", err=True)
+        raise typer.Exit(ExitCode.CONFIG_ERROR)
+    return settings
+
+
+def _baseline_fingerprints(settings: Settings) -> frozenset[str]:
+    """The fingerprints to suppress, or exit 2 when a named baseline cannot be read."""
+    if settings.baseline is None:
+        return frozenset()
+    try:
+        return load_baseline(settings.baseline).fingerprints
+    except BaselineError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(ExitCode.CONFIG_ERROR) from exc
+
+
+def _incomplete(result: GateResult) -> list[str]:
+    """Checks that did not run to completion, for --strict."""
+    return [s.name for s in result.checks_skipped] + [f.name for f in result.checks_failed]
+
+
+def _strict_failure(result: GateResult, strict: bool) -> bool:
+    incomplete = _incomplete(result)
+    if strict and incomplete:
+        typer.echo(
+            f"--strict: {len(incomplete)} check(s) did not run ({', '.join(incomplete)}), "
+            "so this run is not a full verification.",
+            err=True,
+        )
+        return True
+    return False
+
+
+def _exit_code(result: GateResult, fail_on: Severity, strict: bool = False) -> int:
     # Order matters, and timing out comes first: it is the reason the rest of the run is
     # incomplete, so reporting anything else would bury the cause. A run where nothing
     # could be verified reports that next, even when it collected no findings --
     # especially then. A broken toolchain must not masquerade as a clean pass, and
-    # neither may a truncated one.
+    # neither may a truncated one. Under --strict, a partial toolchain is the same.
     if result.timed_out:
         return ExitCode.TIMED_OUT
     if not result.any_check_ran:
+        return ExitCode.NOTHING_RAN
+    if _strict_failure(result, strict):
         return ExitCode.NOTHING_RAN
     if result.findings_at_or_above(fail_on):
         return ExitCode.FINDINGS
     return ExitCode.CLEAN
 
 
-def _verify_exit_code(result: VerifyResult, fail_on: Severity) -> int:
+def _verify_exit_code(result: VerifyResult, fail_on: Severity, strict: bool = False) -> int:
     """Like `_exit_code`, but a verified fix clears the finding it fixed.
 
     Derived from `Decision.status`, which only `VerifierLoop` sets and which cannot be
@@ -179,22 +362,11 @@ def _verify_exit_code(result: VerifyResult, fail_on: Severity) -> int:
         return ExitCode.TIMED_OUT
     if not result.gate.any_check_ran:
         return ExitCode.NOTHING_RAN
+    if _strict_failure(result.gate, strict):
+        return ExitCode.NOTHING_RAN
     if result.unresolved_at_or_above:
         return ExitCode.FINDINGS
     return ExitCode.CLEAN
-
-
-def _validate_common(path: Path, policy_dir: Path | None, timeout: int, check_timeout: int) -> None:
-    if not path.is_dir():
-        typer.echo(f"not a directory: {path}", err=True)
-        raise typer.Exit(ExitCode.CONFIG_ERROR)
-    if policy_dir is not None and not policy_dir.is_dir():
-        typer.echo(f"policy directory does not exist: {policy_dir}", err=True)
-        raise typer.Exit(ExitCode.CONFIG_ERROR)
-    for flag, value in (("--timeout", timeout), ("--check-timeout", check_timeout)):
-        if value <= 0:
-            typer.echo(f"{flag} must be greater than zero", err=True)
-            raise typer.Exit(ExitCode.CONFIG_ERROR)
 
 
 def _load_exceptions(path: Path) -> ExceptionStore:
@@ -270,101 +442,88 @@ def _resolve_provider(no_llm: bool) -> tuple[LLMProvider | None, str | None]:
 @app.command()
 def scan(
     path: Annotated[Path, typer.Argument(help="Directory of Terraform to scan.")],
-    fail_on: Annotated[
-        Severity,
-        typer.Option(
-            "--fail-on",
-            help="Minimum severity that sets a non-zero exit.",
-            case_sensitive=False,
-        ),
-    ] = Severity.HIGH,
+    fail_on: FailOnOption = None,
     output_format: Annotated[
         OutputFormat, typer.Option("--format", help="Report format.")
     ] = OutputFormat.TERMINAL,
-    policy_dir: Annotated[
-        Path | None,
-        typer.Option("--policy-dir", help="Additional policy directory."),
-    ] = None,
-    timeout: Annotated[
-        int, typer.Option("--timeout", help=_TIMEOUT_HELP)
-    ] = DEFAULT_RUN_TIMEOUT_SECONDS,
-    check_timeout: Annotated[
-        int, typer.Option("--check-timeout", help=_CHECK_TIMEOUT_HELP)
-    ] = DEFAULT_CHECK_TIMEOUT_SECONDS,
+    policy_dir: PolicyDirOption = None,
+    timeout: TimeoutOption = None,
+    check_timeout: CheckTimeoutOption = None,
     provenance: ProvenanceOption = None,
     generated_by: GeneratedByOption = None,
     report: ReportOption = None,
+    config: ConfigOption = None,
+    baseline: BaselineOption = None,
+    strict: StrictOption = None,
 ) -> None:
     """Run the deterministic gate. No model is involved."""
-    _validate_common(path, policy_dir, timeout, check_timeout)
-    reports = _parse_reports(report)
-
-    config = GateConfig(
+    settings = _settings(
+        path,
+        config_file=config,
         fail_on=fail_on,
-        check=CheckConfig(timeout_seconds=check_timeout, policy_dir=policy_dir),
+        timeout=timeout,
+        check_timeout=check_timeout,
+        policy_dir=policy_dir,
+        baseline=baseline,
+        strict=strict,
     )
-    result = default_gate().run(path, config, Deadline(timeout))
-    _write_reports(reports, _GATE_RENDERERS, result, fail_on)
+    reports = _parse_reports(report)
+    exceptions = _load_exceptions(path)
+
+    gate_config = settings.gate_config(_baseline_fingerprints(settings))
+    result = default_gate().run(path, gate_config, Deadline(settings.timeout))
+    for lapsed in suppress_exempted(result, exceptions):
+        when = f" on {lapsed.expires.isoformat()}" if lapsed.expires else ""
+        typer.echo(
+            f"exception for {lapsed.rule_class} on {lapsed.resource_address} expired{when}; "
+            f"{lapsed.approved_by}'s sign-off no longer applies and the finding counts again.",
+            err=True,
+        )
+    _write_reports(reports, _GATE_RENDERERS, result, settings.fail_on)
 
     if provenance is not None:
         _write_provenance(
-            gate_as_verify_result(result, fail_on),
+            gate_as_verify_result(result, settings.fail_on),
             provenance,
             path,
             model=None,
             generated_by=generated_by,
         )
 
-    typer.echo(_GATE_RENDERERS[output_format](result, fail_on=fail_on))
-    raise typer.Exit(_exit_code(result, fail_on))
+    typer.echo(_GATE_RENDERERS[output_format](result, fail_on=settings.fail_on))
+    raise typer.Exit(_exit_code(result, settings.fail_on, settings.strict))
 
 
 def _run_loop(
     path: Path,
-    fail_on: Severity,
+    settings: Settings,
     output_format: OutputFormat,
-    policy_dir: Path | None,
-    timeout: int,
-    check_timeout: int,
     no_llm: bool,
-    max_retries: int,
-    max_llm_findings: int,
     explain_only: bool,
     provenance: Path | None = None,
     generated_by: str | None = None,
     report: list[str] | None = None,
 ) -> None:
-    _validate_common(path, policy_dir, timeout, check_timeout)
     reports = _parse_reports(report)
-    if max_retries < 0:
-        typer.echo("--max-retries cannot be negative", err=True)
-        raise typer.Exit(ExitCode.CONFIG_ERROR)
-    if max_llm_findings <= 0:
-        typer.echo("--max-llm-findings must be greater than zero", err=True)
-        raise typer.Exit(ExitCode.CONFIG_ERROR)
-
-    config = GateConfig(
-        fail_on=fail_on,
-        check=CheckConfig(timeout_seconds=check_timeout, policy_dir=policy_dir),
-    )
+    gate_config = settings.gate_config(_baseline_fingerprints(settings))
     provider, reason = _resolve_provider(no_llm)
     gate: Gate = default_gate()
 
     loop = VerifierLoop(
         gate,
-        config,
+        gate_config,
         provider,
-        max_retries=max_retries,
-        max_findings=max_llm_findings,
+        max_retries=settings.max_retries,
+        max_findings=settings.max_llm_findings,
         exceptions=_load_exceptions(path),
     )
-    result = loop.run(path, explain_only=explain_only, deadline=Deadline(timeout))
+    result = loop.run(path, explain_only=explain_only, deadline=Deadline(settings.timeout))
     if provider is None and reason:
         result.llm_unavailable_reason = reason
 
     # After `llm_unavailable_reason` is set: a report that omitted "no model was used"
     # would read as a run where the model had nothing to fix.
-    _write_reports(reports, _VERIFY_RENDERERS, result, fail_on)
+    _write_reports(reports, _VERIFY_RENDERERS, result, settings.fail_on)
 
     if provenance is not None:
         _write_provenance(
@@ -375,62 +534,60 @@ def _run_loop(
             generated_by=generated_by,
         )
 
-    typer.echo(_VERIFY_RENDERERS[output_format](result, fail_on=fail_on))
-    raise typer.Exit(_verify_exit_code(result, fail_on))
+    typer.echo(_VERIFY_RENDERERS[output_format](result, fail_on=settings.fail_on))
+    raise typer.Exit(_verify_exit_code(result, settings.fail_on, settings.strict))
 
 
 @app.command()
 def verify(
     path: Annotated[Path, typer.Argument(help="Directory of Terraform to verify.")],
-    fail_on: Annotated[
-        Severity,
-        typer.Option(
-            "--fail-on",
-            help="Minimum severity that sets a non-zero exit.",
-            case_sensitive=False,
-        ),
-    ] = Severity.HIGH,
+    fail_on: FailOnOption = None,
     output_format: Annotated[
         OutputFormat, typer.Option("--format", help="Report format.")
     ] = OutputFormat.TERMINAL,
-    policy_dir: Annotated[
-        Path | None, typer.Option("--policy-dir", help="Additional policy directory.")
-    ] = None,
-    timeout: Annotated[
-        int, typer.Option("--timeout", help=_TIMEOUT_HELP)
-    ] = DEFAULT_RUN_TIMEOUT_SECONDS,
-    check_timeout: Annotated[
-        int, typer.Option("--check-timeout", help=_CHECK_TIMEOUT_HELP)
-    ] = DEFAULT_CHECK_TIMEOUT_SECONDS,
+    policy_dir: PolicyDirOption = None,
+    timeout: TimeoutOption = None,
+    check_timeout: CheckTimeoutOption = None,
     no_llm: Annotated[
         bool, typer.Option("--no-llm", help="Deterministic mode. Same as scan, with decisions.")
     ] = False,
     max_retries: Annotated[
-        int, typer.Option("--max-retries", help="Patch attempts per finding before escalation.")
-    ] = 2,
-    max_llm_findings: Annotated[
-        int,
-        typer.Option("--max-llm-findings", help="Cap on findings sent to the model."),
-    ] = 25,
+        int | None,
+        typer.Option(
+            "--max-retries",
+            help=f"Patch attempts per finding before escalation. [default: {DEFAULT_MAX_RETRIES}]",
+        ),
+    ] = None,
+    max_llm_findings: MaxLlmFindingsOption = None,
     provenance: ProvenanceOption = None,
     generated_by: GeneratedByOption = None,
     report: ReportOption = None,
+    config: ConfigOption = None,
+    baseline: BaselineOption = None,
+    strict: StrictOption = None,
 ) -> None:
     """Scan, draft fixes, re-verify them through the same gate, escalate what fails.
 
     The workspace is never modified: patches are applied to a temporary copy. Only
     fixes that pass re-verification are shown.
     """
+    settings = _settings(
+        path,
+        config_file=config,
+        fail_on=fail_on,
+        timeout=timeout,
+        check_timeout=check_timeout,
+        policy_dir=policy_dir,
+        baseline=baseline,
+        strict=strict,
+        max_retries=max_retries,
+        max_llm_findings=max_llm_findings,
+    )
     _run_loop(
         path,
-        fail_on,
+        settings,
         output_format,
-        policy_dir,
-        timeout,
-        check_timeout,
         no_llm,
-        max_retries,
-        max_llm_findings,
         explain_only=False,
         provenance=provenance,
         generated_by=generated_by,
@@ -441,49 +598,98 @@ def verify(
 @app.command()
 def explain(
     path: Annotated[Path, typer.Argument(help="Directory of Terraform to explain.")],
-    fail_on: Annotated[
-        Severity,
-        typer.Option(
-            "--fail-on",
-            help="Minimum severity that sets a non-zero exit.",
-            case_sensitive=False,
-        ),
-    ] = Severity.HIGH,
+    fail_on: FailOnOption = None,
     output_format: Annotated[
         OutputFormat, typer.Option("--format", help="Report format.")
     ] = OutputFormat.TERMINAL,
-    policy_dir: Annotated[
-        Path | None, typer.Option("--policy-dir", help="Additional policy directory.")
-    ] = None,
-    timeout: Annotated[
-        int, typer.Option("--timeout", help=_TIMEOUT_HELP)
-    ] = DEFAULT_RUN_TIMEOUT_SECONDS,
-    check_timeout: Annotated[
-        int, typer.Option("--check-timeout", help=_CHECK_TIMEOUT_HELP)
-    ] = DEFAULT_CHECK_TIMEOUT_SECONDS,
-    max_llm_findings: Annotated[
-        int, typer.Option("--max-llm-findings", help="Cap on findings sent to the model.")
-    ] = 25,
+    policy_dir: PolicyDirOption = None,
+    timeout: TimeoutOption = None,
+    check_timeout: CheckTimeoutOption = None,
+    max_llm_findings: MaxLlmFindingsOption = None,
     provenance: ProvenanceOption = None,
     generated_by: GeneratedByOption = None,
     report: ReportOption = None,
+    config: ConfigOption = None,
+    baseline: BaselineOption = None,
+    strict: StrictOption = None,
 ) -> None:
     """Scan and explain the findings in prose. No patches are drafted."""
-    _run_loop(
+    settings = _settings(
         path,
-        fail_on,
-        output_format,
-        policy_dir,
-        timeout,
-        check_timeout,
-        no_llm=False,
+        config_file=config,
+        fail_on=fail_on,
+        timeout=timeout,
+        check_timeout=check_timeout,
+        policy_dir=policy_dir,
+        baseline=baseline,
+        strict=strict,
         max_retries=0,
         max_llm_findings=max_llm_findings,
+    )
+    _run_loop(
+        path,
+        settings,
+        output_format,
+        no_llm=False,
         explain_only=True,
         provenance=provenance,
         generated_by=generated_by,
         report=report,
     )
+
+
+@app.command("baseline")
+def baseline_command(
+    path: Annotated[Path, typer.Argument(help="Directory of Terraform to snapshot.")],
+    output: Annotated[
+        Path | None,
+        typer.Option(
+            "--output",
+            "-o",
+            help=f"Where to write it. [default: PATH/{DEFAULT_BASELINE_PATH.as_posix()}]",
+        ),
+    ] = None,
+    policy_dir: PolicyDirOption = None,
+    timeout: TimeoutOption = None,
+    check_timeout: CheckTimeoutOption = None,
+    config: ConfigOption = None,
+) -> None:
+    """Record today's findings so later runs fail only on new ones.
+
+    For adopting the gate on a repository that already has violations. Commit the file;
+    a pull request that grows it shows up in review. Exceptions, not the baseline, are
+    for violations someone has actually accepted.
+    """
+    settings = _settings(
+        path,
+        config_file=config,
+        timeout=timeout,
+        check_timeout=check_timeout,
+        policy_dir=policy_dir,
+    )
+    # Never filtered by an existing baseline: re-recording must see everything.
+    result = default_gate().run(path, settings.gate_config(), Deadline(settings.timeout))
+    typer.echo(render_terminal(result, fail_on=settings.fail_on), err=True)
+    if result.timed_out:
+        typer.echo("Not written: the run timed out, so the snapshot would be partial.", err=True)
+        raise typer.Exit(ExitCode.TIMED_OUT)
+    if not result.any_check_ran:
+        typer.echo("Not written: no check ran, so there is nothing to record.", err=True)
+        raise typer.Exit(ExitCode.NOTHING_RAN)
+
+    target = output or settings.baseline or path / DEFAULT_BASELINE_PATH
+    snapshot = Baseline.from_findings(result.findings)
+    write_baseline(snapshot, target)
+    incomplete = _incomplete(result)
+    if incomplete:
+        # Written anyway: a baseline missing a check's findings suppresses less, never
+        # more. But whoever commits it should know it will need re-recording.
+        typer.echo(
+            f"warning: {', '.join(incomplete)} did not run; findings from it are not in "
+            "the baseline and will fail later runs that have it.",
+            err=True,
+        )
+    typer.echo(f"Baseline of {len(snapshot.findings)} finding(s) written to {target}.")
 
 
 exceptions_app = typer.Typer(

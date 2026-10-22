@@ -443,3 +443,131 @@ def test_an_unwritable_report_does_not_change_the_exit_code(monkeypatch, tmp_pat
     result = runner.invoke(cli.app, ["scan", str(tmp_path), "--report", "json=out.json"])
 
     assert result.exit_code == 1
+
+
+def write_exception(root: Path, *, expires: str | None = None) -> None:
+    args = [
+        "exceptions",
+        "add",
+        str(root),
+        "--rule-class",
+        "s3.acl.public",
+        "--resource",
+        "aws_s3_bucket.*",
+        "--justification",
+        "public website bucket",
+        "--approved-by",
+        "alice",
+    ]
+    if expires:
+        args += ["--expires", expires]
+    assert runner.invoke(cli.app, args).exit_code == 0
+
+
+def test_scan_honours_a_live_exception(monkeypatch, tmp_path):
+    """It used to ignore the store: a signed-off violation still failed the build."""
+    use_gate(monkeypatch, [StubCheck("checkov", available(), [finding(Severity.CRITICAL)])])
+    write_exception(tmp_path)
+
+    result = runner.invoke(cli.app, ["scan", str(tmp_path), "--format", "json"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["findings"] == []
+    (suppressed,) = payload["suppressed"]
+    assert suppressed["kind"] == "exception"
+    assert suppressed["exception_ref"]["approved_by"] == "alice"
+
+
+def test_scan_counts_a_finding_whose_exception_expired(monkeypatch, tmp_path):
+    use_gate(monkeypatch, [StubCheck("checkov", available(), [finding(Severity.CRITICAL)])])
+    write_exception(tmp_path, expires="2020-01-01")
+
+    result = runner.invoke(cli.app, ["scan", str(tmp_path)])
+
+    assert result.exit_code == 1
+    assert "expired on 2020-01-01" in result.stderr
+
+
+def test_scan_provenance_keeps_exempted_findings_as_decisions(monkeypatch, tmp_path):
+    use_gate(monkeypatch, [StubCheck("checkov", available(), [finding(Severity.CRITICAL)])])
+    write_exception(tmp_path)
+    record = tmp_path / "out" / "provenance.json"
+
+    runner.invoke(cli.app, ["scan", str(tmp_path), "--provenance", str(record)])
+
+    (decision,) = json.loads(record.read_text(encoding="utf-8"))["decisions"]
+    assert decision["status"] == "EXEMPTED"
+
+
+def test_strict_fails_a_run_where_any_check_did_not_run(monkeypatch, tmp_path):
+    checks = [
+        StubCheck("checkov", available()),
+        StubCheck("opa", ToolAvailability.missing("opa", "not on PATH")),
+    ]
+    use_gate(monkeypatch, checks)
+
+    assert runner.invoke(cli.app, ["scan", str(tmp_path)]).exit_code == 0
+    strict = runner.invoke(cli.app, ["scan", str(tmp_path), "--strict"])
+    assert strict.exit_code == 3
+    assert "opa" in strict.stderr
+
+
+def test_strict_passes_when_everything_ran(monkeypatch, tmp_path):
+    use_gate(monkeypatch, [StubCheck("checkov", available())])
+    assert runner.invoke(cli.app, ["scan", str(tmp_path), "--strict"]).exit_code == 0
+
+
+def test_the_baseline_command_records_findings_that_then_stop_failing(monkeypatch, tmp_path):
+    use_gate(monkeypatch, [StubCheck("checkov", available(), [finding(Severity.CRITICAL)])])
+
+    created = runner.invoke(cli.app, ["baseline", str(tmp_path)])
+    assert created.exit_code == 0
+    path = tmp_path / ".plimsoll" / "baseline.json"
+    assert path.is_file()
+
+    result = runner.invoke(cli.app, ["scan", str(tmp_path), "--baseline", str(path)])
+    assert result.exit_code == 0
+    assert "1 suppressed (1 by baseline)" in result.stdout
+
+
+def test_the_baseline_command_refuses_when_nothing_ran(monkeypatch, tmp_path):
+    use_gate(monkeypatch, [StubCheck("opa", ToolAvailability.missing("opa", "not on PATH"))])
+
+    result = runner.invoke(cli.app, ["baseline", str(tmp_path)])
+
+    assert result.exit_code == 3
+    assert not (tmp_path / ".plimsoll" / "baseline.json").exists()
+
+
+def test_a_named_baseline_that_does_not_exist_is_a_config_error(monkeypatch, tmp_path):
+    use_gate(monkeypatch, [StubCheck("checkov", available())])
+    result = runner.invoke(cli.app, ["scan", str(tmp_path), "--baseline", "missing.json"])
+    assert result.exit_code == 2
+
+
+def test_the_config_file_sets_defaults_and_a_flag_overrides_it(monkeypatch, tmp_path):
+    use_gate(monkeypatch, [StubCheck("checkov", available(), [finding(Severity.MEDIUM)])])
+    (tmp_path / ".plimsoll").mkdir()
+    (tmp_path / ".plimsoll" / "config.yaml").write_text("fail_on: medium\n", encoding="utf-8")
+
+    assert runner.invoke(cli.app, ["scan", str(tmp_path)]).exit_code == 1
+    assert runner.invoke(cli.app, ["scan", str(tmp_path), "--fail-on", "high"]).exit_code == 0
+
+
+def test_a_malformed_config_file_is_a_config_error(monkeypatch, tmp_path):
+    use_gate(monkeypatch, [StubCheck("checkov", available())])
+    (tmp_path / ".plimsoll").mkdir()
+    (tmp_path / ".plimsoll" / "config.yaml").write_text("fail-on: low\n", encoding="utf-8")
+
+    result = runner.invoke(cli.app, ["scan", str(tmp_path)])
+
+    assert result.exit_code == 2
+    assert "fail-on" in result.stderr
+
+
+def test_junit_is_an_output_format(monkeypatch, tmp_path):
+    use_gate(monkeypatch, [StubCheck("checkov", available(), [finding(Severity.CRITICAL)])])
+    result = runner.invoke(cli.app, ["scan", str(tmp_path), "--format", "junit"])
+    assert result.exit_code == 1
+    assert '<testsuites name="plimsoll"' in result.stdout
