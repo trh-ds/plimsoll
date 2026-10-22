@@ -40,7 +40,7 @@ SARIF_VERSION = "2.1.0"
 SCHEMA_URI = (
     "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json"
 )
-INFORMATION_URI = "https://github.com/plimsoll/plimsoll"
+INFORMATION_URI = "https://github.com/trh-ds/plimsoll"
 
 # SARIF has three levels and Plimsoll has five. CRITICAL and HIGH both block a merge, so
 # both are errors; LOW and INFO are notes. Collapsing MEDIUM into `warning` rather than
