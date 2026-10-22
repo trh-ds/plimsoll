@@ -34,24 +34,31 @@ inputs:
       through the same gate), or explain (prose, no patches).
     required: false
     default: scan
+  # The tunable inputs below default to empty, not to the CLI's defaults. An empty input
+  # passes no flag, so `.plimsoll/config.yaml` decides and the CLI default applies after
+  # that. Defaulting them here would override a repository's own config on every run.
   fail-on:
-    description: Minimum severity that fails the job -- critical, high, medium, low, or info.
+    description: >-
+      Minimum severity that fails the job -- critical, high, medium, low, or info.
+      Defaults to the repository's config, then high.
     required: false
-    default: high
+    default: ""
   policy-dir:
     description: An additional Rego policy directory, evaluated alongside the bundled pack.
     required: false
     default: ""
   timeout:
-    description: Whole-run budget in seconds. A run that exceeds it exits 4 and never reports clean.
+    description: >-
+      Whole-run budget in seconds. A run that exceeds it exits 4 and never reports clean.
+      Defaults to the repository's config, then 600.
     required: false
-    default: "600"
+    default: ""
   check-timeout:
     description: >-
       Per-subprocess timeout in seconds, capped by `timeout`. Raise it when a cold
-      provider download is slow; the default is 120.
+      provider download is slow. Defaults to the repository's config, then 120.
     required: false
-    default: "120"
+    default: ""
   no-llm:
     description: >-
       Deterministic mode for `verify`. Ignored by `scan`, which never contacts a model.
@@ -59,9 +66,28 @@ inputs:
     required: false
     default: "false"
   max-retries:
-    description: Patch attempts per finding before the run escalates with the original finding.
+    description: >-
+      Patch attempts per finding before the run escalates with the original finding.
+      Defaults to the repository's config, then 2.
     required: false
-    default: "2"
+    default: ""
+  config:
+    description: Settings file. Defaults to `.plimsoll/config.yaml` under `path`, when it exists.
+    required: false
+    default: ""
+  baseline:
+    description: >-
+      Baseline file written by `plimsoll baseline`. Findings in it are reported but do
+      not fail the job, so adopting the gate on an existing repository fails only on
+      what a change introduces.
+    required: false
+    default: ""
+  strict:
+    description: >-
+      Fail with exit 3 unless every check ran. The image ships every tool, so in the
+      Action a check that did not run means something broke.
+    required: false
+    default: "true"
   generated-by:
     description: Who or what wrote this configuration. Recorded in the provenance record.
     required: false
@@ -111,7 +137,11 @@ outputs:
   escalated:
     description: Findings that could not be fixed and need a human.
   exempted:
-    description: Findings matched by a live entry in .plimsoll/exceptions.yaml.
+    description: Findings matched by a live entry in .plimsoll/exceptions.yaml. `verify` only.
+  suppressed:
+    description: >-
+      Findings not counted toward the result: by a live exception under `scan`, or by
+      the baseline under any command.
   exit-code:
     description: >-
       The CLI's own code, passed through untranslated -- 0 clean, 1 findings, 2 config
@@ -151,6 +181,9 @@ runs:
     INPUT_CHECK_TIMEOUT: ${{ inputs.check-timeout }}
     INPUT_NO_LLM: ${{ inputs.no-llm }}
     INPUT_MAX_RETRIES: ${{ inputs.max-retries }}
+    INPUT_CONFIG: ${{ inputs.config }}
+    INPUT_BASELINE: ${{ inputs.baseline }}
+    INPUT_STRICT: ${{ inputs.strict }}
     INPUT_GENERATED_BY: ${{ inputs.generated-by }}
     INPUT_SARIF: ${{ inputs.sarif }}
     INPUT_COMMENT: ${{ inputs.comment }}
