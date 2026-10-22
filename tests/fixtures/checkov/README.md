@@ -17,6 +17,7 @@ separators are all as checkov emitted them.
 | `compliant_s3.json` | `tests/fixtures/compliant_s3` | 6 failures on a config that satisfies the whole v0.1 rule pack. Checkov's defaults are broader than this project's scope; these are the leftovers, and they must not be classified as violations. |
 | `nothing_found.json` | a config with only a `variable` block | A clean run emits **a bare summary object with no `results` key**. `payload["results"]` raises `KeyError` on it. |
 | `multi_framework.json` | a config with a provider block holding literal credentials | Checkov emits a **JSON list** when more than one framework produces findings — here `terraform` and `secrets`. Any repository with a hardcoded credential produces this shape. |
+| `rules_violating.json` | `tests/fixtures/rules/violating` | Captured on Linux, 2026-10-22, checkov 3.3.15, same command. Absolute paths rewritten from the checkout to `/repo`. The source for the security group, RDS, EBS, IAM trust, admin-attachment, and provider-credential mappings in `rule_map.py`: each was read off this file *and* matched to the Rego pack's finding on the same resource address in the same run. Also the source of the provider address rule: checkov names a provider block `aws.default`, the pack `provider.aws`. |
 
 ## What the captures taught us
 
