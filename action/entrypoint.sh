@@ -40,8 +40,13 @@ sarif_report="${reports}/plimsoll.sarif"
 comment_report="${reports}/plimsoll-comment.md"
 provenance_report="${reports}/provenance.json"
 
-args=("$command_name" "$workspace" "--fail-on" "${INPUT_FAIL_ON:-high}")
-args+=("--report" "json=${json_report}")
+args=("$command_name" "$workspace" "--report" "json=${json_report}")
+
+# Empty means "not set here", so the repository's own config file decides.
+[ -n "${INPUT_FAIL_ON:-}" ] && args+=("--fail-on" "${INPUT_FAIL_ON}")
+[ -n "${INPUT_CONFIG:-}" ] && args+=("--config" "${INPUT_CONFIG}")
+[ -n "${INPUT_BASELINE:-}" ] && args+=("--baseline" "${INPUT_BASELINE}")
+[ "${INPUT_STRICT:-true}" = "true" ] && args+=("--strict")
 
 [ -n "${INPUT_POLICY_DIR:-}" ] && args+=("--policy-dir" "${INPUT_POLICY_DIR}")
 [ -n "${INPUT_TIMEOUT:-}" ] && args+=("--timeout" "${INPUT_TIMEOUT}")
@@ -71,7 +76,7 @@ mapfile -t counts < <(python3 -c '
 import json, sys
 with open(sys.argv[1], encoding="utf-8") as handle:
     summary = json.load(handle)["summary"]
-for key in ("findings", "blocking", "fixed", "escalated", "exempted"):
+for key in ("findings", "blocking", "fixed", "escalated", "exempted", "suppressed"):
     print(summary.get(key, 0))
 ' "$json_report")
 
@@ -81,6 +86,7 @@ for key in ("findings", "blocking", "fixed", "escalated", "exempted"):
     echo "fixed=${counts[2]:-0}"
     echo "escalated=${counts[3]:-0}"
     echo "exempted=${counts[4]:-0}"
+    echo "suppressed=${counts[5]:-0}"
     echo "exit-code=${status}"
     echo "report-dir=${reports}"
     echo "json-report=${json_report}"
@@ -96,18 +102,20 @@ if [ "${INPUT_PR_COMMENT:-false}" = "true" ] && [ -s "$comment_report" ]; then
     python3 /usr/local/bin/post_comment.py "$comment_report"
 fi
 
+fail_on_label=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["fail_on"])' "$json_report" 2>/dev/null || echo "the threshold")
+
 case "$status" in
     0) ;;
     1)
         if [ "${INPUT_FAIL_ON_FINDINGS:-true}" != "true" ]; then
-            echo "::warning::${counts[1]:-0} finding(s) at or above ${INPUT_FAIL_ON:-high}." \
+            echo "::warning::${counts[1]:-0} finding(s) at or above ${fail_on_label}." \
                  "Not failing the job, because fail-on-findings is false."
             exit 0
         fi
-        echo "::error::${counts[1]:-0} finding(s) at or above ${INPUT_FAIL_ON:-high}."
+        echo "::error::${counts[1]:-0} finding(s) at or above ${fail_on_label}."
         ;;
     2) echo "::error::plimsoll could not start. Check the inputs to this step." ;;
-    3) echo "::error::no check could run, so nothing was verified. This is not a pass." ;;
+    3) echo "::error::not every check could run (see the log), so this is not a full verification." ;;
     4) echo "::error::the run exceeded its timeout. Partial verification is not verification." ;;
 esac
 
