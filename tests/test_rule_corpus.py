@@ -48,7 +48,17 @@ def scan(directory: Path) -> GateResult:
 
 
 def rule_classes(result: GateResult) -> set[str]:
-    return {f.rule_class for f in result.findings if f.source is CheckSource.OPA}
+    """Every rule class the Rego pack reported, including where it was deduplicated.
+
+    With checkov on PATH, a violation both tools flag survives as checkov's finding with
+    OPA in `also_reported_by`. Counting `source` alone made the pack look silent on the
+    violating corpus, and would have hidden a false positive on the compliant one.
+    """
+    return {
+        f.rule_class
+        for f in result.findings
+        if f.source is CheckSource.OPA or CheckSource.OPA in f.also_reported_by
+    }
 
 
 @pytest.fixture(scope="module")
