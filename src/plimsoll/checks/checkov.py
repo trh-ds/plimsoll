@@ -27,6 +27,7 @@ megabytes of passes nobody reads.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 from collections.abc import Mapping, Sequence
@@ -45,6 +46,10 @@ from plimsoll.core.models import (
 BINARY = "checkov"
 _VERSION_TIMEOUT_SECONDS = 60
 _TERRAFORM_FRAMEWORKS = frozenset({"terraform", "terraform_plan"})
+# Checkov names a provider block `aws.default`; the Rego pack names it `provider.aws`.
+# Unnormalised, one hardcoded key in a provider block was two CRITICAL findings and two
+# model calls. A resource type always contains an underscore, so this cannot match one.
+_DEFAULT_PROVIDER = re.compile(r"^([a-z0-9]+)\.default$")
 
 
 def _relative(file_path: str) -> Path:
@@ -76,6 +81,9 @@ def _address(entry: Mapping[str, Any], check_type: str) -> tuple[str, str]:
     resource = str(entry.get("resource") or "")
     if check_type not in _TERRAFORM_FRAMEWORKS or "." not in resource:
         return "", ""
+    provider = _DEFAULT_PROVIDER.match(resource)
+    if provider:
+        return f"provider.{provider.group(1)}", "provider"
     return split_address(resource)
 
 

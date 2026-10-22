@@ -254,3 +254,57 @@ def test_against_real_checkov():
     classes = {f.rule_class for f in findings}
     assert "s3.acl.public" in classes
     assert "iam.action.wildcard" in classes
+
+
+def test_every_mapped_check_id_appears_in_a_captured_fixture():
+    """`rule_map.py` admits only IDs read off real output. This is that rule, enforced."""
+    from plimsoll.checks.rule_map import CHECKOV
+
+    seen = {
+        f.rule_id
+        for path in FIXTURES.glob("*.json")
+        for f in ck.parse_checkov_output(json.loads(path.read_text(encoding="utf-8")))
+    }
+    assert set(CHECKOV) - seen == set()
+
+
+# What the Rego pack reported on tests/fixtures/rules/violating in the same run the
+# checkov fixture was captured from. The addresses must agree for the two to deduplicate.
+REGO_ON_THE_SAME_CORPUS = {
+    ("iam.trust.wildcard_principal", "aws_iam_role.wide_open"),
+    ("iam.policy.admin_attached", "aws_iam_role_policy_attachment.admin"),
+    ("sg.ingress.world_ssh", "aws_security_group.open"),
+    ("sg.ingress.world_rdp", "aws_security_group.open"),
+    ("sg.ingress.world_open", "aws_security_group.open"),
+    ("rds.encryption.missing", "aws_db_instance.reports"),
+    ("rds.public.enabled", "aws_db_instance.reports"),
+    ("ebs.encryption.missing", "aws_ebs_volume.scratch"),
+    ("provider.static_credentials", "provider.aws"),
+}
+
+
+def test_mapped_checks_land_on_the_address_the_rule_pack_uses():
+    findings = ck.parse_checkov_output(load("rules_violating"))
+    reported = {(f.rule_class, f.resource_address) for f in findings}
+    assert REGO_ON_THE_SAME_CORPUS - reported == set()
+
+
+def test_a_default_provider_block_is_addressed_as_the_rule_pack_addresses_it():
+    finding = by_rule(ck.parse_checkov_output(load("rules_violating")), "CKV_AWS_41")
+    assert (finding.resource_address, finding.resource_type) == ("provider.aws", "provider")
+
+
+def test_checkov_and_the_rule_pack_collapse_into_one_finding():
+    from plimsoll.core.gate import _deduplicate
+
+    ssh = by_rule(ck.parse_checkov_output(load("rules_violating")), "CKV_AWS_24")
+    rego = ssh.model_copy(
+        update={
+            "id": "",
+            "source": CheckSource.OPA,
+            "rule_id": "PLIM_SG_001",
+            "also_reported_by": [],
+        }
+    )
+    (merged,) = _deduplicate([ssh, rego])
+    assert merged.also_reported_by == [CheckSource.OPA]

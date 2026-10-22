@@ -42,6 +42,17 @@ CHECKOV: dict[str, RuleMapping] = {
     "CKV2_AWS_40": RuleMapping("iam.policy.admin_attached", Severity.HIGH),
     # Secrets -- verified against tests/fixtures/checkov/multi_framework.json
     "CKV_SECRET_2": RuleMapping("secret.hardcoded", Severity.CRITICAL),
+    # Verified against tests/fixtures/checkov/rules_violating.json, each on the same
+    # resource address the Rego pack reports the same class on, so the two deduplicate.
+    "CKV_AWS_60": RuleMapping("iam.trust.wildcard_principal", Severity.CRITICAL),
+    "CKV_AWS_274": RuleMapping("iam.policy.admin_attached", Severity.HIGH),
+    "CKV_AWS_24": RuleMapping("sg.ingress.world_ssh", Severity.CRITICAL),
+    "CKV_AWS_25": RuleMapping("sg.ingress.world_rdp", Severity.CRITICAL),
+    "CKV_AWS_260": RuleMapping("sg.ingress.world_open", Severity.HIGH),
+    "CKV_AWS_16": RuleMapping("rds.encryption.missing", Severity.HIGH),
+    "CKV_AWS_17": RuleMapping("rds.public.enabled", Severity.CRITICAL),
+    "CKV_AWS_3": RuleMapping("ebs.encryption.missing", Severity.HIGH),
+    "CKV_AWS_41": RuleMapping("provider.static_credentials", Severity.CRITICAL),
 }
 
 
