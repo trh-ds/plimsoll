@@ -98,9 +98,9 @@ the product.
 ran most of what they check by hand, on Linux, with all four tools installed; see
 `progress.md`. What it found is fixed. What is left:
 
-- [ ] The Action image builds, and `doctor` inside it reports all four adapters `ok`.
-      **Still never built**: Docker Hub rate-limited the base image, and with a mirror
-      the build had no route to the Debian package mirrors.
+- [x] The Action image builds, and `doctor` inside it reports all four adapters `ok`.
+      First built by the `action-image` job on the pull request for this work; it could
+      not be built locally (Docker Hub rate limit, no route to the Debian mirrors).
 - [x] The SARIF schema validation passes. Validated against the SchemaStore copy of the
       2.1.0 schema; the OASIS host was blocked from that machine.
 - [x] `checkov` runs alongside terraform and opa, and cross-tool deduplication works.
