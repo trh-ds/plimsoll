@@ -153,6 +153,7 @@ Matching is exact on `rule_class`, glob on `resource_address`. An expired entry 
 plimsoll scan <path>       Deterministic only. No model. Fast.                    [built]
 plimsoll verify <path>     Full loop: scan, explain, fix, re-verify, attest.      [built]
 plimsoll explain <path>    Scan plus explanations, no patches.                    [built]
+plimsoll baseline <path>   Record current findings so later runs fail only on new ones. [built]
 plimsoll exceptions        Subcommands: list, add, expire, prune.                 [built]
 plimsoll doctor            Report which external tools and providers are available. [built]
 ```
@@ -163,7 +164,7 @@ plimsoll doctor            Report which external tools and providers are availab
 |---|---|---|---|
 | `--policy-dir` | none | Additional Rego to load alongside the bundled pack | built |
 | `--fail-on` | `high` | Minimum severity that sets a non-zero exit | built |
-| `--format` | `terminal` | `terminal` \| `json` \| `sarif` \| `github`, on stdout | built |
+| `--format` | `terminal` | `terminal` \| `json` \| `sarif` \| `github` \| `junit`, on stdout | built |
 | `--report` | none | `FORMAT=PATH`, repeatable. Several reports from one run | built |
 | `--provenance` | none | Path to write the JSON record | built |
 | `--no-llm` | false | Force deterministic mode | built |
@@ -172,6 +173,14 @@ plimsoll doctor            Report which external tools and providers are availab
 | `--generated-by` | `unknown` | Recorded in provenance | built |
 | `--timeout` | 600 | Whole-run budget in seconds; a run that exceeds it exits 4 | built |
 | `--check-timeout` | 120 | Per-subprocess timeout, capped by `--timeout` | built |
+| `--baseline` | none | Baseline file; findings in it are suppressed, not counted | built |
+| `--strict` | false | Exit 3 unless every check ran | built |
+| `--config` | `PATH/.plimsoll/config.yaml` | Per-repository defaults; any flag overrides | built |
+
+**Added later still.** `--baseline`, `--strict`, and `--config`. Every default above can
+also come from `.plimsoll/config.yaml`; the order is flag, then file, then the default in
+this table. The file rejects unknown keys, because a misspelt key silently ignored leaves
+the gate at a threshold nobody chose.
 
 **Added after this contract was written.** `--check-timeout` did not exist: `--timeout`
 originally meant the per-subprocess value, which is a different promise. A workspace with
@@ -205,7 +214,7 @@ endpoint speaking a different wire format needs a new provider module in
 | 0 | No findings at or above `--fail-on` |
 | 1 | Findings at or above threshold remain unresolved |
 | 2 | Configuration error (bad policy dir, invalid flags) |
-| 3 | No checks available to run — nothing was verified |
+| 3 | No checks available to run — nothing was verified. Under `--strict`, any check that did not run |
 | 4 | Run exceeded `--timeout` |
 
 Code 3 exists so a broken toolchain cannot masquerade as a clean pass. Silence must never read as success. Code 4 is checked before code 1 for the same reason: a run that timed out never exits 0, because partial verification is not verification.

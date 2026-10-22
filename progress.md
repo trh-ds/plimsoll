@@ -4,7 +4,7 @@ Running log. Newest entries at the top of each phase. Both humans and coding age
 
 **Current phase:** Phase 1 — The gate (Phase 0 is being run outside this repo)
 **Started:** 2026-08-30
-**Last updated:** 2026-08-30
+**Last updated:** 2026-10-22
 
 ---
 
@@ -393,6 +393,53 @@ against it.
 ---
 
 ## Phase 4 — Ship
+
+### 2026-10-22 — First run with all four tools together, and adoption features
+
+**Done:** The gate ran end to end on Linux against terraform 1.15.8, opa 1.20.1, and
+checkov 3.3.15 at once, for the first time anywhere. `pytest -m slow` (10), `opa test`
+(61), and SARIF and provenance schema validation all pass against real output. Three bugs
+fixed from that run (below). Then the features that decide whether a team keeps a policy
+gate switched on: `plimsoll baseline` and `--baseline`, exceptions honoured by `scan`,
+`.plimsoll/config.yaml`, `--strict`, a JUnit reporter, a pre-commit hook, and the Action
+inputs for all of them. Nine checkov IDs mapped from a real capture of the rule corpus.
+
+**Surprises:**
+- **The rule-corpus test failed the moment checkov was installed.** The gate was right:
+  deduplication kept checkov's copy and recorded OPA in `also_reported_by`. The test
+  counted `source` only. The handoff predicted this exact gap and nothing could test it.
+- **Rejected AWS credentials became a HIGH finding.** The container had AWS keys that STS
+  refused. `has_real_credentials()` correctly declined to write the override, the plan
+  failed on `GetCallerIdentity`, and the adapter reported the diagnostic as a violation on
+  the `provider` line while OPA skipped. Any CI runner with an expired key would have hit
+  it. Now a failed check that says how to fix the runner.
+- **`scan` never read the exception store.** The README promised the opposite. Only
+  `verify` applied it.
+- **The Action would have overridden the config file.** It passed `--fail-on high` and both
+  timeouts unconditionally.
+- **Checkov addresses a provider as `aws.default`.** The Rego pack says `provider.aws`, so
+  one leaked key was two CRITICAL findings.
+- `registry.terraform.io` was blocked on this machine; a filesystem mirror of
+  `hashicorp/aws` 5.100.0 from `releases.hashicorp.com` got terraform through. Docker
+  started, but Docker Hub rate-limited the base image, and with a mirror of the same
+  digest the build containers still could not resolve the Debian mirrors. **The image is
+  still unbuilt.**
+
+**Decisions:**
+- *Suppression moves findings, never deletes them.* `GateResult.suppressed` holds every
+  held-back finding with its reason, and every reporter counts it.
+- *Baselines key on a new `Finding.fingerprint`*, not `Finding.id`: the id has the line
+  number in it, and a baseline that broke on every edit would be deleted in a week.
+- *The baseline lives in `GateConfig` and is applied inside `Gate.run`*, so the verifier
+  re-runs a patch under the same baseline (invariant 2), rather than as a step after the
+  gate that re-verification would skip.
+- *A baseline is not a decision.* Exempted findings go into `scan`'s provenance as
+  `EXEMPTED`; baselined ones do not, because nobody reviewed them.
+- *`--strict` is opt-in on the CLI and on by default in the Action.* A laptop without
+  checkov is normal; an Action image without it is broken.
+
+**Next:** unchanged at the top — run the benchmark against a live model. Then the image
+build, on a runner with Docker Hub access.
 
 **Exit criterion:** ten lines of workflow YAML in an unrelated repo produce a useful PR comment. **Built, not demonstrated** — see below.
 

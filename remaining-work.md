@@ -13,7 +13,7 @@ Delete this file when the list is empty.
 ```powershell
 git log --oneline -14          # the session below ends at e62add1
 uv sync
-uv run pytest -m "not slow"    # 399, must be green before you change anything
+uv run pytest -m "not slow"    # 453, must be green before you change anything
 uv run plimsoll doctor         # which of terraform, opa, checkov this machine has
 ```
 
@@ -25,7 +25,7 @@ If `doctor` shows `checkov` missing, that is expected on this machine — see
 ## Where the tree is
 
 Phases 1 through 4 of [`implementation_plan.md`](implementation_plan.md) are built.
-`ruff`, `mypy src/`, `pytest -m "not slow"` (399), `pytest -m slow` (10), and
+`ruff`, `mypy src/`, `pytest -m "not slow"` (453), `pytest -m slow` (10), and
 `opa test src/plimsoll/policies` (61) are green; `opa check --strict` is clean.
 
 Three things have **never been exercised for real**. Every document in the repository says
@@ -94,18 +94,24 @@ the product.
 
 ## 2. Watch the first integration run
 
-`integration.yml` and its `action-image` job have never run. On the first push:
+`integration.yml` and its `action-image` job have never run in CI. The 2026-10-22 session
+ran most of what they check by hand, on Linux, with all four tools installed; see
+`progress.md`. What it found is fixed. What is left:
 
 - [ ] The Action image builds, and `doctor` inside it reports all four adapters `ok`.
-- [ ] The SARIF schema validation passes against the live OASIS URL.
-- [ ] `checkov` runs. It is broken locally, so the adapter, its severity mappings, and
-      cross-tool deduplication between checkov and the Rego pack have never been
-      exercised together anywhere.
-- [ ] The compliant corpus still exits 0 **with checkov present**. `cb467a0` changed that
-      fixture in anticipation of exactly this and could not be tested locally.
-- [ ] `pytest -m slow` passes on a runner doing a cold provider download.
+      **Still never built**: Docker Hub rate-limited the base image, and with a mirror
+      the build had no route to the Debian package mirrors.
+- [x] The SARIF schema validation passes. Validated against the SchemaStore copy of the
+      2.1.0 schema; the OASIS host was blocked from that machine.
+- [x] `checkov` runs alongside terraform and opa, and cross-tool deduplication works.
+      It found the corpus-test bug and the provider-address mismatch, both fixed.
+- [x] The compliant corpus exits 0 with checkov present. It still reports nine
+      unclassified MEDIUM findings from checkov's broader defaults, by design.
+- [x] `pytest -m slow` passes, with a cold provider install from a local mirror.
 
-Expect something here to be wrong. Three of those five have never executed.
+**One more thing to check in CI:** if the runner has AWS credentials that AWS rejects,
+`terraform_plan` now fails as a check rather than reporting a finding, and with `strict`
+on in the Action that is exit 3. That is correct, and it will surprise someone.
 
 ## 3. Needs the repository owner
 
@@ -143,6 +149,9 @@ Expect something here to be wrong. Three of those five have never executed.
 
 Discovered the hard way in the previous session. Each of these costs an hour to
 rediscover.
+
+**These notes are from a Windows machine.** On Linux, Bash works and none of the
+PowerShell caveats apply.
 
 **Use PowerShell, not the Bash tool.** `bash -lc` hangs on this machine — a simple
 `ls`/`find` did not return inside two minutes. Every command in this file is PowerShell.
