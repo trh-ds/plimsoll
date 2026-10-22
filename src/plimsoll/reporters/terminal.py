@@ -52,6 +52,11 @@ def _header(result: GateResult) -> list[str]:
         lines.append(f"  skipped {skipped.name}: {skipped.reason}")
     for failed in result.checks_failed:
         lines.append(f"  FAILED  {failed.name}: {failed.error}")
+    summary = result.suppression_summary()
+    if summary:
+        # In the header, not the footer: a short findings list means something different
+        # when forty more are being held back, and the reader should know before reading it.
+        lines.append(f"  {summary}; not counted toward the exit code.")
     return lines
 
 

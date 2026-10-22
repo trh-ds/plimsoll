@@ -24,6 +24,8 @@ from plimsoll.core.models import (
     GateConfig,
     GateResult,
     SkippedCheck,
+    SuppressedFinding,
+    SuppressionKind,
     ToolAvailability,
     ToolVersion,
 )
@@ -252,6 +254,22 @@ def _deduplicate(findings: list[Finding]) -> list[Finding]:
     return out
 
 
+def _apply_baseline(result: GateResult, baseline: frozenset[str]) -> None:
+    """Move findings that predate the baseline out of the counted set.
+
+    After deduplication, so one violation two tools reported is matched once.
+    """
+    kept: list[Finding] = []
+    for finding in result.findings:
+        if finding.fingerprint in baseline:
+            result.suppressed.append(
+                SuppressedFinding(finding=finding, kind=SuppressionKind.BASELINE)
+            )
+        else:
+            kept.append(finding)
+    result.findings = kept
+
+
 class Gate:
     """Runs check adapters and aggregates their findings."""
 
@@ -292,6 +310,8 @@ class Gate:
                 self._run_one(check, ctx, result)
         result.findings.sort(key=_sort_key)
         result.findings = _deduplicate(result.findings)
+        if cfg.baseline:
+            _apply_baseline(result, cfg.baseline)
         return result
 
     def _run_one(self, check: Check, ctx: CheckContext, result: GateResult) -> None:

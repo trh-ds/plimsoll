@@ -27,6 +27,8 @@ from plimsoll.core.models import (
     Finding,
     GateResult,
     Severity,
+    SuppressedFinding,
+    SuppressionKind,
     VerifyResult,
 )
 
@@ -140,7 +142,12 @@ def _result(finding: Finding, decision: Decision | None = None) -> dict[str, Any
         "rank": _RANK[finding.severity],
         "message": {"text": _message(finding, decision)},
         "locations": [_location(finding)],
-        "partialFingerprints": {"plimsollFindingId": finding.id},
+        # `plimsollFingerprint/v1` survives lines moving; code scanning uses it to tell
+        # that an alert on line 40 is the one that was on line 38 before an edit.
+        "partialFingerprints": {
+            "plimsollFindingId": finding.id,
+            "plimsollFingerprint/v1": finding.fingerprint,
+        },
         "properties": properties,
     }
     if decision is not None and decision.status is DecisionStatus.EXEMPTED:
@@ -154,6 +161,21 @@ def _result(finding: Finding, decision: Decision | None = None) -> dict[str, Any
                 else "",
             }
         ]
+    return result
+
+
+def _suppressed_result(suppressed: SuppressedFinding) -> dict[str, Any]:
+    """A suppressed finding, still in the log, closed by SARIF's own mechanism."""
+    result = _result(suppressed.finding)
+    ref = suppressed.exception_ref
+    if suppressed.kind is SuppressionKind.EXCEPTION and ref is not None:
+        justification = f"{ref.approved_by}: {ref.justification}"
+    else:
+        justification = "present when the baseline was recorded"
+    result["suppressions"] = [{"kind": "external", "justification": justification}]
+    if suppressed.kind is SuppressionKind.BASELINE:
+        result["baselineState"] = "unchanged"
+    result["properties"]["plimsoll-suppressed-by"] = suppressed.kind.value
     return result
 
 
@@ -262,14 +284,16 @@ def _tool(findings: list[Finding], result: GateResult) -> dict[str, Any]:
 def build_sarif(result: GateResult, decisions: list[Decision] | None = None) -> dict[str, Any]:
     """The SARIF log for one run. `decisions` adds verification status to each result."""
     by_id = {d.finding.id: d for d in decisions or []}
+    every = result.findings + [s.finding for s in result.suppressed]
     return {
         "$schema": SCHEMA_URI,
         "version": SARIF_VERSION,
         "runs": [
             {
-                "tool": _tool(result.findings, result),
+                "tool": _tool(every, result),
                 "invocations": [_invocation(result)],
-                "results": [_result(f, by_id.get(f.id)) for f in result.findings],
+                "results": [_result(f, by_id.get(f.id)) for f in result.findings]
+                + [_suppressed_result(s) for s in result.suppressed],
             }
         ],
     }

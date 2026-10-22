@@ -142,6 +142,9 @@ def _footer(result: GateResult) -> list[str]:
         lines.append(f"<br>Skipped {skipped.name}: {skipped.reason}")
     for failed in result.checks_failed:
         lines.append(f"<br>**Failed** {failed.name}: {failed.error}")
+    summary = result.suppression_summary()
+    if summary:
+        lines.append(f"<br>{summary.capitalize()}; not counted toward the result.")
     lines.append("</sub>")
     lines.append(MARKER)
     return lines
